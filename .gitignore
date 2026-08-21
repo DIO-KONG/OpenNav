@@ -1,0 +1,106 @@
+# ==========================
+# 开发调试相关
+# ==========================
+wenhao
+episodes/ep*
+saved_images
+__pycache__
+nav_system
+.venv
+*.run
+debug*
+wenhao/masterslam
+wenhao/MASt3R-SLAM
+*.ply
+*debug
+*output
+*.png
+nav_memory_backup
+vlm_pairs
+# ==========================
+# 🚫 媒体与大文件 (Media & Large Files)
+# ==========================
+# 视频文件
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.flv
+*.wmv
+
+# 音频文件
+*.mp3
+*.wav
+*.flac
+*.aac
+
+# 图像大文件 (如 RAW 或 PSD)
+*.psd
+*.raw
+*.tiff
+
+# ==========================
+# 📦 数据与模型 (Data & Models)
+# ==========================
+# 数据集目录
+data/
+dataset/
+datasets/
+raw_data/
+
+# 数据文件
+*.csv
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.npy
+*.npz
+*.parquet
+*.dat
+
+# 模型权重/检查点
+*.pth
+*.pt
+*.ckpt
+*.model
+*.weights
+*.pb
+*.onnx
+*.bin
+
+# ==========================
+# 🗜️ 压缩包与构建产物 (Archives & Build)
+# ==========================
+*.zip
+*.tar
+*.tar.gz
+*.rar
+*.7z
+*.iso
+*.img
+*.exe
+*.msi
+
+# 构建与临时目录
+build/
+dist/
+out/
+temp/
+tmp/
+cache/
+logs/
+*.log
+Qwens
+__pycache__
+wenhao/masterslam
+
+# ==========================
+# 🛠️ IDE 与系统文件 (IDE & OS)
+# ==========================
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

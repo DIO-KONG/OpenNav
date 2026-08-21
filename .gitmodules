@@ -1,0 +1,6 @@
+[submodule "masterslam"]
+	path = masterslam
+	url = https://gitee.com/yonggie/MASt3R-SLAM
+[submodule "independent_mobile_sam"]
+	path = mobile_sam
+	url = https://gitee.com/yonggie/independent_mobile_sam.git

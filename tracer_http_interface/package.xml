@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>tracer_http_interface</name>
+  <version>1.0.0</version>
+  <description>HTTP RESTful API interface for Tracer mobile robot chassis control</description>
+  <maintainer email="zephyr@hkust-gz.edu.cn">Zephyr Yin</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <exec_depend>tracer_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+
+
+  <export>
+  </export>
+</package>

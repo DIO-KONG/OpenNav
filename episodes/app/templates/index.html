@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Episode Debug Visualizer</title>
+    <link rel="stylesheet" href="/static/css/style.css?v=step-jump-1">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <div class="app-header">
+        <div class="brand">
+            <i class="fa-solid fa-robot brand-icon"></i>
+            <h2>Episode Debugger <span>(0.0.0.0:8011)</span></h2>
+        </div>
+        <div class="ep-selector-box">
+            <label for="ep-kind-filter" class="ep-filter-label">类型</label>
+            <select id="ep-kind-filter" class="ep-filter-select" title="按 ep_ / eps_ 筛选">
+                <option value="all" selected>全部</option>
+                <option value="ep">ep_ 未标记</option>
+                <option value="eps">eps_ 成功</option>
+            </select>
+
+            <div id="ep-all-filters" class="ep-all-filters" style="display:none;">
+                <label for="ep-date-filter" class="ep-filter-label">日期</label>
+                <input type="date" id="ep-date-filter" class="ep-date-input" title="按目录名日期筛选" />
+                <label for="ep-hour-filter" class="ep-filter-label">小时</label>
+                <select id="ep-hour-filter" class="ep-filter-select" title="按目录名小时筛选">
+                    <option value="" selected>全部小时</option>
+                </select>
+            </div>
+
+            <label for="ep-select"><i class="fa-solid fa-folder-open"></i> Episode</label>
+            <select id="ep-select" class="ep-select-main">
+                <option value="">加载中...</option>
+            </select>
+            <button id="refresh-ep-btn" title="刷新 Episode 列表"><i class="fa-solid fa-rotate-right"></i></button>
+            <button id="ep-mode-btn" title="切换最近5条 / 全部">查看全部</button>
+            <button id="ep-mark-btn" class="ep-mark-btn" disabled title="请先选择已结束的 Episode">标记成功</button>
+            <button id="ep-delete-btn" class="ep-delete-btn" disabled title="请先选择已结束的 Episode">删除</button>
+        </div>
+    </div>
+
+    <div class="main-layout">
+        <!-- 左侧：轨迹地图与可视快照 Panel -->
+        <div class="panel left-panel">
+            <div class="panel-header">
+                <h3><i class="fa-solid fa-map-location-dot"></i> 2D 历史轨迹与实时 Snapshot</h3>
+                <div class="view-tabs">
+                    <button class="tab-btn" data-tab="split"><i class="fa-solid fa-columns"></i> 双视角</button>
+                    <button class="tab-btn active" data-tab="image"><i class="fa-solid fa-image"></i> 快照帧</button>
+                </div>
+            </div>
+            <div class="views-container">
+                <div class="view-box canvas-box">
+                    <canvas id="trajectory-canvas" width="600" height="400"></canvas>
+                    <div class="canvas-overlay-hud" id="canvas-hud">
+                        <div><span class="dot robot-dot"></span> Pose: <b id="hud-pose">N/A</b></div>
+                        <div><span class="dot path-dot"></span> Progress: <b id="hud-path">N/A</b></div>
+                    </div>
+                </div>
+                <div class="view-box image-box">
+                    <canvas id="snapshot-canvas" style="display:none;"></canvas>
+                    <div id="no-snapshot" class="placeholder-box">
+                        <i class="fa-regular fa-image placeholder-icon"></i>
+                        <p>当前时间点无 JPEG 快照</p>
+                    </div>
+                    <div class="snapshot-mode-btns" id="snapshot-mode-btns" style="display:none;">
+                        <button class="snap-mode-btn active" data-mode="full"  title="显示双流快照">完整</button>
+                        <button class="snap-mode-btn"        data-mode="map"   title="仅点云地图（放大）">地图</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：HUD 数据卡片与事件列表 -->
+        <div class="panel right-panel">
+            <div class="panel-header">
+                <h3><i class="fa-solid fa-gauge-high"></i> Telemetry & Events</h3>
+            </div>
+
+            <div class="status-cards">
+                <div class="card">
+                    <span class="card-title">NavState 状态</span>
+                    <span class="card-val highlight" id="val-state">WAITING</span>
+                </div>
+                <div class="card">
+                    <span class="card-title">位姿 (X, Z, Yaw)</span>
+                    <span class="card-val" id="val-pose">0.00, 0.00, 0°</span>
+                </div>
+                <div class="card">
+                    <span class="card-title">目标距离 d_tgt</span>
+                    <span class="card-val" id="val-dtgt">N/A</span>
+                </div>
+                <div class="card">
+                    <span class="card-title">障碍距离 d_obs</span>
+                    <span class="card-val" id="val-dobs">N/A</span>
+                </div>
+            </div>
+
+            <div class="details-tabs">
+                <button class="dtab-btn active" data-dtab="events-list"><i class="fa-solid fa-list-check"></i> 状态与动作事件</button>
+                <button class="dtab-btn" data-dtab="vlm-list"><i class="fa-solid fa-eye"></i> VLM / 坐标记录</button>
+                <button class="dtab-btn" data-dtab="memory-list"><i class="fa-solid fa-circle-nodes"></i> Memory 记录</button>
+                <button class="dtab-btn" data-dtab="log-view"><i class="fa-solid fa-terminal"></i> Console Log</button>
+                <div class="step-jump-box" title="输入 step 数字，跳转到最近位置">
+                    <label for="step-jump-input">Step</label>
+                    <input id="step-jump-input" type="number" inputmode="numeric" min="0" step="1" placeholder="跳转…" />
+                    <button id="step-jump-btn" type="button" title="跳转到最近 step"><i class="fa-solid fa-magnifying-glass"></i></button>
+                </div>
+            </div>
+
+            <div class="details-content">
+                <div class="dtab-pane active" id="events-list">
+                    <ul class="event-items" id="event-items-ul">
+                        <li class="empty-tip">暂无事件数据</li>
+                    </ul>
+                </div>
+                <div class="dtab-pane" id="vlm-list">
+                    <ul class="event-items" id="vlm-items-ul">
+                        <li class="empty-tip">暂无 VLM 或坐标记录</li>
+                    </ul>
+                </div>
+                <div class="dtab-pane" id="memory-list">
+                    <ul class="event-items" id="memory-items-ul">
+                        <li class="empty-tip">暂无 Memory 记录</li>
+                    </ul>
+                </div>
+                <div class="dtab-pane" id="log-view">
+                    <ul class="event-items" id="console-items-ul" style="display:none;"></ul>
+                    <pre class="log-text" id="log-text-pre">加载控制台日志...</pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 底部：时间轴控制区 -->
+    <div class="timeline-bar">
+        <div class="controls-row">
+            <div class="play-controls">
+                <button id="btn-first" title="跳至起点 (Home)"><i class="fa-solid fa-backward-step"></i></button>
+                <button id="btn-prev" title="上一帧 (←)"><i class="fa-solid fa-caret-left"></i></button>
+                <button id="btn-play" class="play-btn" title="播放/暂停 (空格)"><i class="fa-solid fa-play"></i></button>
+                <button id="btn-next" title="下一帧 (→)"><i class="fa-solid fa-caret-right"></i></button>
+                <button id="btn-last" title="跳至终点 (End)"><i class="fa-solid fa-forward-step"></i></button>
+                <select id="speed-select" title="播放速度">
+                    <option value="0.5">0.5x</option>
+                    <option value="1.0" selected>1.0x</option>
+                    <option value="2.0">2.0x</option>
+                    <option value="5.0">5.0x</option>
+                </select>
+            </div>
+            <div class="time-display">
+                Step: <span id="current-step">0</span> / <span id="max-step">0</span>
+                <span class="sep">|</span>
+                Time: <span id="current-time">00:00.00</span> / <span id="total-time">00:00.00</span>
+            </div>
+        </div>
+        <div class="slider-row">
+            <input type="range" id="timeline-slider" min="0" max="100" value="0" step="0.1">
+            <div class="timeline-ticks" id="timeline-ticks"></div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js?v=step-jump-2"></script>
+</body>
+</html>

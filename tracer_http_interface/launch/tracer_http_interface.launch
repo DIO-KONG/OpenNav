@@ -1,0 +1,16 @@
+<launch>
+  <arg name="host" default="0.0.0.0" />
+  <arg name="port" default="8080" />
+  <arg name="max_linear_vel" default="1.5" />
+  <arg name="max_angular_vel" default="3.0" />
+  <arg name="watchdog_timeout" default="1.0" />
+
+  <node name="tracer_http_interface" pkg="tracer_http_interface"
+        type="tracer_http_server.py" output="screen" required="true">
+    <param name="host" value="$(arg host)" />
+    <param name="port" value="$(arg port)" />
+    <param name="max_linear_vel" value="$(arg max_linear_vel)" />
+    <param name="max_angular_vel" value="$(arg max_angular_vel)" />
+    <param name="watchdog_timeout" value="$(arg watchdog_timeout)" />
+  </node>
+</launch>

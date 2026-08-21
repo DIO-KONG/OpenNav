@@ -1,0 +1,14 @@
+# nav_memory 语义词表 (single source for vocab only)
+# 几何 / 阈值已统一到 nav_constants.py (从 ROBOT_RADIUS 派生, 与 nav 联动),
+# 此处只保留语义词表, 方便编辑词与别名。
+# 保留 id 必须与 nav_memory/types.py 的 SID_* 一致。
+
+vocab:
+  entries:
+    - id: 1
+      name: walked
+      aliases: [walk, footprint]
+    # object memory 尚未启用；保留定义备查，暂不注册入口。
+    # - id: 2
+    #   name: dust_bin
+    #   aliases: [dustbin, trash_can, "垃圾桶"]
