@@ -1,10 +1,9 @@
 #!/usr/bin/env python
-"""nav_mock 的辅助函数集合 (检测 / VLM / 位姿 / 障碍 / frontier)。
+"""导航辅助函数集合 (检测 / VLM / 位姿 / 障碍 / frontier)。
 
-从 nav_mock.py 抽出, 主状态机只 `from nav_helpers import ...` 即可,
-main() 逻辑不动。所有函数均为纯函数或轻量类, 仅依赖 nav_control
-(mock / _angle_diff) 与标准库/numpy/open3d, 不反向依赖 nav_mock,
-因此不会引入循环 import。
+主状态机只 `from nav_helpers import ...` 即可。所有函数均为纯函数或轻量类,
+仅依赖 nav_control (mock / _angle_diff) 与标准库/numpy/open3d, 不反向依赖
+主循环, 因此不会引入循环 import。
 """
 from __future__ import annotations
 

@@ -58,27 +58,6 @@ SLAM_STALE_DROP_S = 0.5
 # 回调线程维持 RGB 显示, 避免 RELOC 时画面完全冻结。
 RELOC_FRONTEND_MIN_DT = 0.12
 
-# ============================================================
-#  性能/延迟探针开关 (与 nav_mock 的 DEBUG_PROBES 对应)
-# ------------------------------------------------------------
-#  排查卡顿 / 帧延迟 / SLAM 退化时, 按需在对应项置 True 即可打开,
-#  无需增删任何打印语句; 目前默认全关 (日常运行不需要这些日志)。
-#    slamstat - 相机回调率 vs 处理率 (proc<<cam 即帧积压 / 随地图退化)
-#    imglat   - 显示帧端到端延迟 (墙钟 - 相机帧头时间戳)
-#    poselat  - 处理位姿相对相机捕获时刻的延迟 (含积压旧帧)
-# ============================================================
-DEBUG_PROBES = {
-    "slamstat": False,
-    "imglat":   False,
-    "poselat":  False,
-}
-
-def _probe(key, msg):
-    """性能探针打印: 仅当 DEBUG_PROBES[key] 为 True 时才输出。"""
-    if DEBUG_PROBES.get(key):
-        print(msg)
-
-
 def _deep_merge(base: dict, override: dict) -> dict:
     """递归合并 override 到 base (override 优先), 返回新 dict。"""
     out = dict(base)
@@ -99,17 +78,10 @@ from mast3r_slam.mast3r_utils import (
 from mast3r_slam.tracker import FrameTracker
 from mast3r_slam.multiprocess_utils import new_queue, try_get_msg
 from mast3r_slam.global_opt import FactorGraph
-import mast3r_slam.evaluate as _eval
 from nav_memory import MemorySystem, sim3_translation, SID_WALKED
-from nav_memory.viz import append_memory_to_ply
 
 import sensor_msgs.msg
 from cv_bridge import CvBridge
-
-
-# 结束时自动保存的默认根目录 (宿主程序未显式指定时使用)。
-# 每次 stop()/shutdown() 会在其下再建一个时间戳子目录, 不会互相覆盖。
-DEFAULT_SAVE_DIR = str(pathlib.Path(__file__).resolve().parent / "slam_output")
 
 
 # ============================================================
@@ -126,8 +98,7 @@ class _WindowMsg:
 # ============================================================
 #  后端函数 (从 main.py 原样复制, 不修改原文件)
 # ============================================================
-def _relocalization(frame, keyframes, factor_graph, retrieval_database,
-                    reloc_log=None):
+def _relocalization(frame, keyframes, factor_graph, retrieval_database):
     with keyframes.lock:
         kf_idx = []
         retrieval_inds = retrieval_database.update(
@@ -159,14 +130,6 @@ def _relocalization(frame, keyframes, factor_graph, retrieval_database,
                 print("\033[93mSuccess! Relocalized\033[0m")
                 successful_loop_closure = True
                 keyframes.T_WC[n_kf - 1] = keyframes.T_WC[kf_idx[0]].clone()
-                # 记录重定位成功: 哪帧找回的, 匹配了哪些 keyframe
-                if reloc_log is not None:
-                    reloc_log.append((
-                        time.time(),          # 时间戳
-                        n_kf - 1,             # relocalizing frame index
-                        list(kf_idx),         # matched keyframe indices
-                        kf_idx[0],            # primary recovery keyframe
-                    ))
             else:
                 keyframes.pop_last()
                 print("\033[93mFailed to relocalize\033[0m")
@@ -179,7 +142,7 @@ def _relocalization(frame, keyframes, factor_graph, retrieval_database,
         return successful_loop_closure
 
 
-def _run_backend(cfg, model, states, keyframes, K, reloc_log=None):
+def _run_backend(cfg, model, states, keyframes, K):
     """后端进程: 全局因子图优化 + 回环检测 + 重定位。"""
     set_global_config(cfg)
 
@@ -197,7 +160,7 @@ def _run_backend(cfg, model, states, keyframes, K, reloc_log=None):
         if mode == Mode.RELOC:
             frame = states.get_frame()
             success = _relocalization(
-                frame, keyframes, factor_graph, retrieval_database, reloc_log
+                frame, keyframes, factor_graph, retrieval_database
             )
             if success:
                 states.set_mode(Mode.TRACKING)
@@ -255,8 +218,8 @@ def _run_backend(cfg, model, states, keyframes, K, reloc_log=None):
 # ============================================================
 #  主类
 # ============================================================
-MAST3R_WEIGHT="/home/agilex/yinzecheng/opennav/masterslam/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth"
-RETRIEVER_WEIGHT="/home/agilex/yinzecheng/opennav/masterslam/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth"
+MAST3R_WEIGHT="checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth"
+RETRIEVER_WEIGHT="checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth"
 class Mast3rSlamWrapper:
     """MASt3R-SLAM 实时封装类。
 
@@ -353,8 +316,6 @@ class Mast3rSlamWrapper:
         self._initialized = False
         self._frame_idx = 0
         self._add_new_kf = False
-        self._timestamps = []  # 关键帧时间戳列表
-        self._reloc_log = self.manager.list()  # 重定位日志 (跨进程共享)
 
         # --- ROS 订阅相关 ---
         self._bridge = CvBridge()
@@ -366,16 +327,6 @@ class Mast3rSlamWrapper:
         self._cb_count = 0        # 累计收到的回调帧数
         self._cb_last_t = 0.0     # 最近一次回调墙钟时间
         self._cb_stall_warned = False  # 停流告警去抖
-        # [SLAMSTAT] 探针: 相机回调率 vs 处理率, 暴露"处理跟不上->帧积压"的退化
-        self._proc_count = 0      # 已处理的帧数
-        self._stat_t = time.time()
-        self._stat_cb0 = 0
-        self._stat_proc0 = 0
-        # [IMGLAT]/[POSELAT] 探针: 端到端延迟 (墙钟 - 相机帧头时间戳)
-        self._img_lat_t = 0.0     # 显示帧延迟打印节流时钟
-        self._pose_lat_t = 0.0    # 位姿延迟打印节流时钟
-        self._last_proc_stamp = 0.0   # 最近处理帧的相机捕获时刻 (ROS 秒)
-        self._drop_count = 0      # 因过旧被丢弃的帧累计数
         self._reloc_last_proc_t = 0.0  # RELOC 前端限流: 上次处理帧的墙钟时刻
         # --- 位姿 CPU 缓存 (由 SLAM 处理线程刷新, getter 只读, 主循环不碰 GPU) ---
         #   每处理完一帧, _refresh_pose_cache() 把 4 份原始 T_WC.data 从 GPU 拷成
@@ -391,15 +342,7 @@ class Mast3rSlamWrapper:
         self._pc_kf_se3 = None    # as_SE3(最后关键帧 T_WC).data 展平: 供 get_pose_full_keyframe
         self._stop_event = threading.Event()
         self._thread = None
-        # --- 结束时自动保存 (供嵌入宿主程序使用, 不依赖 Ctrl+C wrapper 自身) ---
-        #   save_dir: 结束保存根目录; None 时 stop()/shutdown() 回退到 DEFAULT_SAVE_DIR。
-        #             宿主可在构造后设 slam.save_dir = "路径" 覆盖, 或设 None 后再
-        #             手动传参控制。
-        #   _saved:   去重标志, stop()/shutdown() 可能被宿主多处调用(如正常退出 +
-        #             atexit 兜底), 保证点云只存一次。
         #   _stopped: 幂等标志, 保证线程/子进程清理只执行一次。
-        self.save_dir = None
-        self._saved = False
         self._stopped = False
 
     # --------------------------------------------------------
@@ -427,8 +370,7 @@ class Mast3rSlamWrapper:
         # 启动后端子进程
         self.backend_proc = mp.Process(
             target=_run_backend,
-            args=(config, self.model, self.states, self.keyframes, K,
-                  self._reloc_log),
+            args=(config, self.model, self.states, self.keyframes, K),
         )
         self.backend_proc.start()
 
@@ -545,7 +487,6 @@ class Mast3rSlamWrapper:
         # 新关键帧
         if self._add_new_kf:
             self.keyframes.append(frame)
-            self._timestamps.append(time.time())  # 记录时间戳
             self.states.queue_global_optimization(len(self.keyframes) - 1)
             self.memory.sync_keyframe_count(len(self.keyframes))
             while config["single_thread"]:
@@ -605,7 +546,7 @@ class Mast3rSlamWrapper:
                 time.sleep(0.01)
                 continue
 
-            # 记录相机帧头时间戳: 供 [POSELAT] 计算位姿端到端延迟, 并据此丢弃积压旧帧.
+            # 记录相机帧头时间戳, 用于丢弃积压旧帧.
             _h = getattr(msg, "header", None)
             _st = _h.stamp if _h is not None else None
             _stamp = _st.to_sec() if (_st is not None and _st.to_sec() > 0) else 0.0
@@ -613,7 +554,6 @@ class Mast3rSlamWrapper:
             # 这些帧 FIFO 消化完位姿/显示才到位 -> "停车后还滞后 3-4s". 超龄直接跳过,
             # 让前端始终处理当前帧, 位姿立即跟到停车位置.
             if _stamp > 0 and (time.time() - _stamp) > SLAM_STALE_DROP_S:
-                self._drop_count += 1
                 continue
 
             img = self._msg_to_img(msg)
@@ -631,31 +571,6 @@ class Mast3rSlamWrapper:
                 self._reloc_last_proc_t = time.time()
             self._process_frame(img)
             self._refresh_pose_cache()
-
-            # [POSELAT] 探针: 处理出的位姿相对相机真实捕获时刻的延迟 (含积压).
-            # 停车后若仍长期 >1s, 说明有旧帧在被消化; 加丢弃后应回落到正常.
-            if _stamp > 0:
-                _pose_lat = time.time() - _stamp
-                if time.time() - self._pose_lat_t >= 2.0:
-                    _probe("poselat", f"[POSELAT] pose_delay={_pose_lat * 1000:.0f}ms  "
-                          f"dropped={self._drop_count}")
-                    self._pose_lat_t = time.time()
-
-            # [SLAMSTAT] 探针: 每 ~2s 打印相机回调率 vs 处理率. 若 proc<<cam 即帧积压,
-            # 配合 n_kf 增长 -> SLAM 前端随地图变大而变慢 (运行越久越卡的根因之一).
-            self._proc_count += 1
-            if time.time() - self._stat_t >= 2.0:
-                dt = time.time() - self._stat_t
-                cam_rate = (self._cb_count - self._stat_cb0) / dt if dt > 0 else 0
-                proc_rate = (self._proc_count - self._stat_proc0) / dt if dt > 0 else 0
-                n_kf = len(self.keyframes) if self.keyframes is not None else -1
-                _probe("slamstat", f"[SLAMSTAT] cam={cam_rate:.1f}Hz  proc={proc_rate:.1f}Hz  "
-                      f"n_kf={n_kf}  "
-                      f"{'BACKLOG' if proc_rate < cam_rate * 0.7 else 'ok'}")
-                self._stat_t = time.time()
-                self._stat_cb0 = self._cb_count
-                self._stat_proc0 = self._proc_count
-
 
     # --------------------------------------------------------
     #  内部: 刷新位姿 CPU 缓存 (仅在 SLAM 处理线程调用)
@@ -1038,18 +953,6 @@ class Mast3rSlamWrapper:
             with self._latest_msg_lock:
                 self._cb_stall_warned = True
 
-        # [IMGLAT] 探针: 显示帧端到端延迟 = 墙钟 - 相机帧头时间戳.
-        # 若停车后仍长时间 >1s, 证明 _display_msg 在按 FIFO 消化停车前的旧帧积压.
-        _img_lat = 0.0
-        _h = getattr(msg, "header", None)
-        _st = _h.stamp if _h is not None else None
-        if _st is not None and _st.to_sec() > 0:
-            _img_lat = time.time() - _st.to_sec()
-        _now = time.time()
-        if _now - self._img_lat_t >= 2.0:
-            _probe("imglat", f"[IMGLAT] rgb_delay={_img_lat * 1000:.0f}ms")
-            self._img_lat_t = _now
-
         # 用 cv_bridge 直接转成 BGR uint8 (OpenCV 可直接 imshow)
         cv_img = self._bridge.imgmsg_to_cv2(msg, desired_encoding="bgr8")
         return cv_img
@@ -1081,292 +984,11 @@ class Mast3rSlamWrapper:
         except Exception as e:
             print(f"[memory] debug log failed: {e}")
 
-    def _save_memory_debug_artifacts(self, save_dir):
-        """停止时写出 memory.json + 带记忆标记的点云 (调试用)。"""
-        save_dir = pathlib.Path(save_dir)
-        if self.memory is None or not self.memory.enable:
-            return
-        try:
-            self.memory.save(save_dir / "memory.json")
-            print(f"[memory] memory.json ({self.memory.count()} gaussians)")
-        except Exception as e:
-            print(f"[memory] WARNING: save json failed: {e}")
-        map_path = save_dir / "map.ply"
-        if not map_path.exists():
-            return
-        try:
-            n = append_memory_to_ply(
-                map_path,
-                save_dir / "map_with_memory.ply",
-                self.memory,
-                voxel_size=None,
-                save_ply_fn=_eval.save_ply,
-            )
-            print(
-                f"[memory] map_with_memory.ply (+{n} pts; "
-                f"cyan=walked magenta=object red=center)"
-            )
-            n2 = append_memory_to_ply(
-                map_path,
-                save_dir / "map_light_with_memory.ply",
-                self.memory,
-                voxel_size=0.05,
-                save_ply_fn=_eval.save_ply,
-            )
-            print(f"[memory] map_light_with_memory.ply (+{n2} marker pts)")
-        except Exception as e:
-            print(f"[memory] WARNING: overlay ply failed: {e}")
-
-    # --------------------------------------------------------
-    #  主动保存: 地图点云 (PLY)
-    # --------------------------------------------------------
-    def save_map(self, save_dir, filename="map.ply", conf_threshold=1.5):
-        """主动保存当前地图点云到 PLY 文件。
-
-        参数:
-            save_dir:       保存目录
-            filename:      文件名 (默认 "map.ply")
-            conf_threshold: 置信度阈值 (默认 1.5)
-        """
-        if self.keyframes is None or len(self.keyframes) == 0:
-            print("[SLAM] No keyframes to save.")
-            return
-        save_dir = pathlib.Path(save_dir)
-        save_dir.mkdir(exist_ok=True, parents=True)
-        _eval.save_reconstruction(
-            save_dir, filename, self.keyframes, conf_threshold
-        )
-        print(f"[SLAM] Map saved to {save_dir / filename}")
-
-    # --------------------------------------------------------
-    #  主动保存: 轨迹 (TXT)
-    # --------------------------------------------------------
-    def save_traj(self, save_dir, filename="trajectory.txt"):
-        """主动保存相机轨迹到 TXT 文件。
-
-        参数:
-            save_dir: 保存目录
-            filename: 文件名 (默认 "trajectory.txt")
-        """
-        if self.keyframes is None or len(self.keyframes) == 0:
-            print("[SLAM] No keyframes to save.")
-            return
-        save_dir = pathlib.Path(save_dir)
-        save_dir.mkdir(exist_ok=True, parents=True)
-        from mast3r_slam.lietorch_utils import as_SE3
-        n_kf = len(self.keyframes)
-        while len(self._timestamps) < n_kf:
-            self._timestamps.append(float(len(self._timestamps)))
-        traj_path = save_dir / filename
-        with open(traj_path, "w") as f:
-            for i in range(n_kf):
-                kf = self.keyframes[i]
-                t = self._timestamps[i]  # buffer index, 不用 frame_id
-                T_se3 = as_SE3(kf.T_WC)
-                vals = T_se3.data.numpy().reshape(-1)
-                x, y, z, qx, qy, qz, qw = vals[:7]
-                f.write(f"{t} {x} {y} {z} {qx} {qy} {qz} {qw}\n")
-        print(f"[SLAM] Trajectory saved to {traj_path} ({n_kf} keyframes)")
-
-    # --------------------------------------------------------
-    #  主动保存: 关键帧图片
-    # --------------------------------------------------------
-    def save_keyframes(self, save_dir):
-        """主动保存所有关键帧图片。
-
-        参数:
-            save_dir: 保存目录，关键帧图片会存在 save_dir/keyframes/ 下
-        """
-        if self.keyframes is None or len(self.keyframes) == 0:
-            print("[SLAM] No keyframes to save.")
-            return
-        save_dir = pathlib.Path(save_dir)
-        keyframes_dir = save_dir / "keyframes"
-        keyframes_dir.mkdir(exist_ok=True, parents=True)
-        from mast3r_slam.lietorch_utils import as_SE3
-        import json as _json
-        n_kf = len(self.keyframes)
-        while len(self._timestamps) < n_kf:
-            self._timestamps.append(float(len(self._timestamps)))
-        kf_info_list = []
-        for i in range(n_kf):
-            kf = self.keyframes[i]
-            img_np = (kf.uimg.cpu().numpy() * 255).astype(np.uint8)
-            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-            cv2.imwrite(str(keyframes_dir / f"kf_{i:04d}.png"), img_bgr)
-            T_se3 = as_SE3(kf.T_WC)
-            vals = T_se3.data.numpy().reshape(-1)
-            x, y, z, qx, qy, qz, qw = vals[:7]
-            kf_info_list.append({
-                "kf_index": i,
-                "frame_id": int(kf.frame_id),
-                "timestamp": self._timestamps[i],
-                "pose_t": [float(x), float(y), float(z)],
-                "pose_q": [float(qw), float(qx), float(qy), float(qz)],
-            })
-        info_path = save_dir / "keyframes_info.json"
-        with open(info_path, "w") as f:
-            _json.dump(kf_info_list, f, indent=2, ensure_ascii=False)
-        print(f"[SLAM] Keyframes saved to {keyframes_dir} ({n_kf} images)")
-        print(f"[SLAM] Keyframes info saved to {info_path}")
-
-    # --------------------------------------------------------
-    #  主动保存: 全部 (地图+轨迹+关键帧)
-    # --------------------------------------------------------
-    def save_all(self, save_dir, seq_name="slam_session"):
-        """主动保存所有 SLAM 数据 (地图点云+轨迹+关键帧图片)。
-
-        参数:
-            save_dir:  保存目录
-            seq_name: 序列名，用于命名轨迹文件 (默认 "slam_session")
-        """
-        save_dir = pathlib.Path(save_dir)
-        save_dir.mkdir(exist_ok=True, parents=True)
-        self.save_map(save_dir)
-        self.save_traj(save_dir, f"{seq_name}.txt")
-        self.save_keyframes(save_dir)
-        print(f"[SLAM] All data saved to {save_dir}")
-
     # --------------------------------------------------------
     #  停止
     # --------------------------------------------------------
-    def stop(self, save_dir=None):
-        """停止 SLAM, 停止内部线程和后端子进程。
-
-        参数:
-            save_dir: 结束前保存地图点云(PLY, 全量 map.ply + 下采样 map_light.ply)
-                      + 轨迹(TXT) + 关键帧图片 + 重定位日志到该目录下的时间戳子目录。
-                      - 显式传入路径: 用该路径。
-                      - 传 None (默认): 回退到 self.save_dir; 若 self.save_dir 也为 None
-                        则用模块默认 DEFAULT_SAVE_DIR。
-                      => 嵌入宿主程序时, 只要调用 stop() 或 shutdown() 就会自动存点云,
-                         无需 Ctrl+C wrapper 本身。
-                      多次调用(如正常退出 + atexit 兜底)只会保存一次。
-        """
-        # --- 保存目录回退: 宿主未显式传目录时用 self.save_dir / 默认目录 ---
-        if save_dir is None:
-            save_dir = self.save_dir if self.save_dir is not None else DEFAULT_SAVE_DIR
-        # 已保存过则本次跳过保存 (但仍继续往下执行停止/清理)
-        if self._saved:
-            save_dir = None
-
-        # --- 先保存 (此时 keyframes 共享内存还活着) ---
-        if save_dir is not None and self.keyframes is not None and len(self.keyframes) > 0:
-            self._saved = True   # 标记已存, 防止 stop/shutdown 重复调用时重复保存
-            ts_str = time.strftime("%Y%m%d_%H%M%S")
-            save_dir = pathlib.Path(save_dir) / ts_str
-            save_dir.mkdir(exist_ok=True, parents=True)
-            print(f"[SLAM] Saving to {save_dir}...")
-
-            # 1. 点云 (全量 + 下采样)
-            try:
-                _eval.save_reconstruction(
-                    save_dir, "map.ply", self.keyframes, 1.5
-                )
-                print(f"[SLAM] Point cloud saved to {save_dir / 'map.ply'}")
-                try:
-                    import open3d as o3d
-                    pcd = o3d.io.read_point_cloud(
-                        str(save_dir / "map.ply"))
-                    pcd_light = pcd.voxel_down_sample(voxel_size=0.05)
-                    o3d.io.write_point_cloud(
-                        str(save_dir / "map_light.ply"), pcd_light)
-                    n_full = len(pcd.points)
-                    n_light = len(pcd_light.points)
-                    print(f"[SLAM] Downsampled point cloud saved to "
-                          f"{save_dir / 'map_light.ply'}"
-                          f" ({n_full} -> {n_light} points, voxel=0.05m)")
-                except Exception as e:
-                    print(f"[SLAM] WARNING: Failed to downsample"
-                          f" point cloud: {e}")
-                # 调试产物: memory.json + 醒目记忆标记叠到 PLY
-                self._save_memory_debug_artifacts(save_dir)
-            except Exception as e:
-                print(f"[SLAM] WARNING: Failed to save point cloud: {e}")
-
-            # 2+3. 轨迹 + 关键帧图片 + keyframes_info.json
-            #   不用 _eval.save_traj/save_keyframes: 它们用 frame_id
-            #   索引 timestamps, frame_id >= len(timestamps) 时越界崩溃。
-            #   这里用 keyframe buffer index i 遍历, 不用 frame_id。
-            try:
-                from mast3r_slam.lietorch_utils import as_SE3
-                import json as _json
-
-                n_kf = len(self.keyframes)
-                while len(self._timestamps) < n_kf:
-                    self._timestamps.append(float(len(self._timestamps)))
-
-                # 轨迹 (每行: t x y z qx qy qz qw)
-                traj_path = save_dir / "trajectory.txt"
-                kf_info_list = []
-                with open(traj_path, "w") as f:
-                    for i in range(n_kf):
-                        kf = self.keyframes[i]
-                        t = self._timestamps[i]  # buffer index, 不用 frame_id
-                        T_se3 = as_SE3(kf.T_WC)
-                        vals = T_se3.data.numpy().reshape(-1)
-                        x, y, z, qx, qy, qz, qw = vals[:7]
-                        f.write(f"{t} {x} {y} {z} {qx} {qy} {qz} {qw}\n")
-                        kf_info_list.append({
-                            "kf_index": i,
-                            "frame_id": int(kf.frame_id),
-                            "timestamp": t,
-                            "pose_t": [float(x), float(y), float(z)],
-                            "pose_q": [float(qw), float(qx),
-                                       float(qy), float(qz)],
-                        })
-                print(f"[SLAM] Trajectory saved to {traj_path}"
-                      f" ({n_kf} keyframes)")
-
-                # 关键帧图片 (kf_0000.png, kf_0001.png, ...)
-                keyframes_dir = save_dir / "keyframes"
-                keyframes_dir.mkdir(exist_ok=True, parents=True)
-                for i in range(n_kf):
-                    kf = self.keyframes[i]
-                    img_np = (kf.uimg.cpu().numpy() * 255).astype(np.uint8)
-                    img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
-                    cv2.imwrite(
-                        str(keyframes_dir / f"kf_{i:04d}.png"), img_bgr)
-                print(f"[SLAM] Keyframes saved to {keyframes_dir}"
-                      f" ({n_kf} images)")
-
-                # keyframes_info.json (kf_index 与 reloc_log.json 对应)
-                info_path = save_dir / "keyframes_info.json"
-                with open(info_path, "w") as f:
-                    _json.dump(kf_info_list, f, indent=2,
-                               ensure_ascii=False)
-                print(f"[SLAM] Keyframes info saved to {info_path}")
-            except Exception as e:
-                print(f"[SLAM] WARNING: Failed to save trajectory/"
-                      f"keyframes: {e}")
-
-            # 4. 重定位日志
-            try:
-                import json
-                reloc_records = []
-                for entry in self._reloc_log:
-                    ts, frame_idx, matched_kfs, primary_kf = entry
-                    reloc_records.append({
-                        "timestamp": ts,
-                        "time_str": time.strftime(
-                            "%Y-%m-%d %H:%M:%S", time.localtime(ts)),
-                        "reloc_frame_idx": frame_idx,
-                        "matched_kf_indices": matched_kfs,
-                        "primary_recovery_kf": primary_kf,
-                    })
-                reloc_path = save_dir / "reloc_log.json"
-                with open(reloc_path, "w") as f:
-                    json.dump(reloc_records, f, indent=2,
-                              ensure_ascii=False)
-                print(f"[SLAM] Reloc log saved to {reloc_path}"
-                      f" ({len(reloc_records)} entries)")
-            except Exception as e:
-                print(f"[SLAM] WARNING: Failed to save reloc log: {e}")
-
-        elif save_dir is not None:
-            print("[SLAM] No keyframes to save, skipping save.")
-
-        # --- 然后停止 (幂等: 多次调用只清理一次) ---
+    def stop(self):
+        """停止 SLAM, 停止内部线程和后端子进程。幂等: 多次调用只清理一次。"""
         if self._stopped:
             return
         self._stopped = True
@@ -1404,50 +1026,6 @@ class Mast3rSlamWrapper:
     # --------------------------------------------------------
     #  结束 (stop 的别名): 供嵌入宿主的 atexit / 清理逻辑调用
     # --------------------------------------------------------
-    def shutdown(self, save_dir=None):
-        """结束 SLAM, 等价于 stop()。
-
-        很多宿主程序在退出清理里调用 slam.shutdown() 而不是 stop();
-        提供此别名, 确保任意退出路径(正常 return / 异常 / atexit / Ctrl+C 宿主)
-        都会走同一套"自动保存点云 + 停止"逻辑, 且与 stop() 共享去重/幂等标志,
-        不会重复保存或重复清理。
-        """
-        return self.stop(save_dir)
-
-
-# ============================================================
-#  简单测试 (用 RGBRosConnector 模拟, 不依赖 ROS)
-# ============================================================
-if __name__ == "__main__":
-    
-
-    # 测试模式: 不用 ROS, 用 RGBRosConnector 模拟帧流
-    print("[TEST] Testing without ROS (simulation mode)")
-    print("[TEST] This requires a running ROS master and RGB topic.")
-    print("[TEST] If no ROS, it will fail at start().\n")
-
-    # 尝试初始化 rospy (测试用)
-    
-    if not rospy.is_shutdown():
-        try:
-            rospy.init_node("slam_wrapper_test", anonymous=True)
-        except Exception as e:
-            print(f"rospy.init_node failed: {e}")
-            print("This test needs a running ROS master.")
-            sys.exit(1)
-
-    slam = Mast3rSlamWrapper(rgb_topic="/camera_f/color/image_raw")
-    slam.start()
-
-    try:
-        i = 0
-        while not rospy.is_shutdown():
-            time.sleep(0.2)
-            pose = slam.get_pose()
-            mode = slam.get_mode()
-            print(f"[{i}] Mode={mode}, Pose={pose}")
-            i += 1
-    except KeyboardInterrupt:
-        print("\n[SLAM] Ctrl+C detected, saving point cloud before shutdown...")
-    finally:
-        slam.stop(save_dir="slam_output")
+    def shutdown(self):
+        """结束 SLAM, 等价于 stop()。"""
+        return self.stop()

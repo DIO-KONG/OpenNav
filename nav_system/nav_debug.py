@@ -325,9 +325,9 @@ class NavDebugger:
     """
 
     def __init__(self, project_root=None):
-        # 模块已在仓库根目录: 单层 dirname（与 nav_mock 一致）
+        # 默认写到仓库根的 episodes/, 而不是 nav_system/。
         self.project_root = project_root or os.path.dirname(
-            os.path.abspath(__file__))
+            os.path.dirname(os.path.abspath(__file__)))
         self.episode_dir = None
         self.frame_dir = None
         self.log_file = None

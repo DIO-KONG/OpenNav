@@ -2,10 +2,10 @@
 # 开发调试相关
 # ==========================
 wenhao
+legacy/
 episodes/ep*
 saved_images
 __pycache__
-nav_system
 .venv
 *.run
 debug*
@@ -60,6 +60,7 @@ raw_data/
 *.dat
 
 # 模型权重/检查点
+checkpoints/
 *.pth
 *.pt
 *.ckpt
