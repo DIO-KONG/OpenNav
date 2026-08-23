@@ -2,7 +2,6 @@
 # 开发调试相关
 # ==========================
 wenhao
-legacy/
 episodes/ep*
 saved_images
 __pycache__
