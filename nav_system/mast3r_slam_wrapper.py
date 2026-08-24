@@ -44,7 +44,7 @@ import rospy
 import yaml
 
 # ===== 路径设置: 让 mast3r_slam 包可导入 =====
-_SLAM_DIR = pathlib.Path(__file__).resolve().parent / "masterslam"
+_SLAM_DIR = pathlib.Path(__file__).resolve().parent.parent / "MASt3R-SLAM"
 if str(_SLAM_DIR) not in sys.path:
     sys.path.insert(0, str(_SLAM_DIR))
 
@@ -218,8 +218,8 @@ def _run_backend(cfg, model, states, keyframes, K):
 # ============================================================
 #  主类
 # ============================================================
-MAST3R_WEIGHT="checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth"
-RETRIEVER_WEIGHT="checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth"
+MAST3R_WEIGHT = str(_SLAM_DIR / "checkpoints" / "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth")
+RETRIEVER_WEIGHT = str(_SLAM_DIR / "checkpoints" / "MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric_retrieval_trainingfree.pth")
 class Mast3rSlamWrapper:
     """MASt3R-SLAM 实时封装类。
 

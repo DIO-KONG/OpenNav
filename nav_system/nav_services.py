@@ -80,9 +80,8 @@ def bootstrap_services(vlm_url: str, project_root: Optional[str] = None) -> NavS
             project_root = os.path.dirname(project_root)
 
     # 1. 导入底盘 HTTP API
-    tracer_dir = os.path.join(project_root, "tracer_ros", "tracer_http_interface", "scripts")
-    if tracer_dir not in sys.path:
-        sys.path.insert(0, tracer_dir)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     from tracer_http_interface.scripts.rw_api import TracerRobot
 
     # 2. ROS 节点初始化
@@ -95,7 +94,7 @@ def bootstrap_services(vlm_url: str, project_root: Optional[str] = None) -> NavS
     # 4. 相机内参标定 (可选)
     bbox_calib = None
     try:
-        calib_path = os.path.join(project_root, "masterslam", "config", "intrinsics.yaml")
+        calib_path = os.path.join(project_root, "MASt3R-SLAM", "config", "intrinsics.yaml")
         if os.path.exists(calib_path):
             bbox_calib = load_camera_calibration(calib_path)
     except Exception as exc:
