@@ -26,6 +26,7 @@ from nav_constants import (
     FINAL_ADJUST_SMOOTH_ALPHA,
     FINAL_ADJUST_REJECT_DIST,
     ROBOT_RADIUS,
+    DEBUG_FEATURES,
 )
 from nav_control import mock
 from nav_helpers import (
@@ -39,6 +40,7 @@ from nav_helpers import (
 from nav_vlm import qwen_bbox_to_pixel
 from nav_page import draw_debug_overlay, draw_map_view
 
+from nav_memory.types import SID_WALKED
 from nav_services import bootstrap_services, NavServices
 from fsm.context import NavContext
 from fsm.engine import NavigationStateMachine
@@ -334,12 +336,17 @@ def main():
                     yaw=float(cur_pose[2]) if cur_pose else None,
                 )
 
-                memory_gaussians, mem_shape, mem_kappa, n_memory_walked = None, None, None, 0
-                if services.slam.memory and services.slam.memory.enable:
-                    memory_gaussians = services.slam.memory.get_all_for_viz()
-                    mem_shape = getattr(services.slam.memory, "_default_shape", None)
-                    mem_kappa = getattr(services.slam.memory, "_default_kappa", None)
-                    n_memory_walked = services.slam.memory.count()
+                memory_gaussians, mem_shape, mem_kappa, n_memory_walked = None, "disk", 1.0, 0
+                if services.slam.memory and getattr(services.slam.memory, "enable", False):
+                    memory_gaussians = [
+                        (float(r["mu_W"][0]), float(r["mu_W"][2]), float(r.get("radius_W", 0.4)))
+                        for r in services.slam.memory.export_centers_W()
+                        if int(r.get("sid", 0)) == SID_WALKED
+                    ]
+                    n_memory_walked = len(memory_gaussians)
+                    fcfg = services.slam.memory.cfg.get("frontier_grid", {}) if hasattr(services.slam.memory, "cfg") else {}
+                    mem_shape = fcfg.get("shape", "disk")
+                    mem_kappa = float(fcfg.get("kappa", 1.0))
 
                 map_frame = draw_map_view({
                     "obstacle_points": obs_current,
