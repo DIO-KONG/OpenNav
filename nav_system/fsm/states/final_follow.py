@@ -112,7 +112,8 @@ class FinalFollowState(BaseNavState):
                 if ctx.path is not None and len(ctx.path) >= 2:
                     try:
                         blocked = not check_nav_segment((cur_pose[0], cur_pose[1]), ctx.path[1], snapshot.obstacle_snapshot).safe
-                    except Exception:
+                    except Exception as exc:
+                        print(f"[PRETURN] 连接段复检异常 {exc!r}, 按阻挡处理")
                         blocked = True
 
                 if blocked:

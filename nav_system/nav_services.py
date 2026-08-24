@@ -7,7 +7,7 @@ import signal
 import sys
 import threading
 from dataclasses import dataclass
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import rospy
 from nav_msgs.msg import Odometry

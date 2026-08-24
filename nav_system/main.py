@@ -258,8 +258,8 @@ def main():
                 mode=slam_mode,
                 odom_now=odom_now,
                 preturn_active=preturn_active,
-                preturn_slam_anchor=preturn_slam_anchor,
-                preturn_odom_anchor=preturn_odom_anchor,
+                preturn_slam_anchor=preturn_slam,
+                preturn_odom_anchor=preturn_odom,
             )
 
             # 组装不可变单帧快照
