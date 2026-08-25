@@ -85,7 +85,7 @@ def handle_global_auto_detection(
         return
 
     # 1. 消费已完成的异步检测任务
-    vlm_res = ctx.services.vlm_worker.poll()
+    vlm_res = ctx.services.vlm_worker.poll(kind="auto_detect")
     if vlm_res is not None and vlm_res.kind == "auto_detect":
         ctx.auto_det_t = float(vlm_res.finished_at)
         if vlm_res.epoch == ctx.vlm_epoch and not vlm_res.error:
@@ -188,9 +188,9 @@ def main():
     parser = argparse.ArgumentParser(description="模块化导航主程序 (FSM 架构)")
     parser.add_argument(
         "--mode",
-        default="object",
+        default="open",
         choices=["object", "open", "frontier"],
-        help="导航任务模式 (默认: object)",
+        help="导航任务模式 (默认: open；object 模式保持 legacy 的开局跳过扫描行为)",
     )
     parser.add_argument(
         "--vlm-url",

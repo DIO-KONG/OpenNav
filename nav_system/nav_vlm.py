@@ -377,12 +377,31 @@ class AsyncVlmWorker:
                 self._active_request_id = None
             return False
 
-    def poll(self) -> Optional[VlmResult]:
-        """非阻塞取出一个完成结果。"""
+    def poll(self, kind=None) -> Optional[VlmResult]:
+        """非阻塞取出一个完成结果。
+
+        ``kind`` 可为单个任务类型或类型集合。主循环中存在多个独立
+        消费者时，只取属于自己的结果；不匹配的结果会放回队列，且在
+        被正确消费者取走前保持 worker busy。
+        """
         try:
             result = self._results.get_nowait()
         except queue.Empty:
             return None
+
+        if kind is not None:
+            allowed = {kind} if isinstance(kind, str) else set(kind)
+            if result.kind not in allowed:
+                # 当前只有主线程消费结果，取出后立即放回不会阻塞；保留
+                # active_request_id，避免同一结果尚未处理时提交新任务。
+                try:
+                    self._results.put_nowait(result)
+                except queue.Full:
+                    # 理论上不会发生；若发生，结果仍由 active id 标记，
+                    # 后续消费者可继续重试。
+                    pass
+                return None
+
         with self._lock:
             if self._active_request_id == result.request_id:
                 self._active_request_id = None

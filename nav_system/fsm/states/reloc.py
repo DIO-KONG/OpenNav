@@ -116,6 +116,10 @@ class RelocState(BaseNavState):
 
         elif self.phase in ("spin", "detect_hold"):
             # 处理异步 VLM 结果 (spin 期间视觉目标截胡)
+            # RELOC 是高优先级恢复态，必须像 legacy 的全局结果处理一样
+            # 取走并释放其它状态遗留的结果（例如刚进入 RELOC 前提交的
+            # auto_detect/direction），否则 worker 会一直 busy，RELOC 无法
+            # 提交自己的 presence 请求。
             vlm_res = ctx.services.vlm_worker.poll()
             if vlm_res is not None and vlm_res.epoch == ctx.vlm_epoch:
                 if vlm_res.kind == "reloc_presence":

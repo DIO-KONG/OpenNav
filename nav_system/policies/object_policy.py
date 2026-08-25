@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Object 导航策略：开局跳过扫描建图，VLM 方向问询，目标检测单次确认即切入终调。"""
+"""Object 导航策略：开局扫描建图，随后进行 VLM 方向问询，目标检测单次确认即切入终调。"""
 from __future__ import annotations
 
 import time
@@ -24,7 +24,7 @@ from nav_helpers import (
 
 class ObjectNavPolicy(BaseNavigationPolicy):
     name: str = "object"
-    default_boot_scan_done: bool = True  # 开局跳过扫描建图
+    default_boot_scan_done: bool = False  # 开局强制扫描建图
 
     def should_query_presence(self, ctx: "NavContext", in_adjust: bool) -> bool:
         # 一旦画面确认过目标存在，在非 adjust 巡逻期间不再重复携带 presence
@@ -50,7 +50,7 @@ class ObjectNavPolicy(BaseNavigationPolicy):
             return StateDecision(command_desc="inquiry: waiting pose/img")
 
         # 1. 检查是否有已完成的异步方向问询结果
-        vlm_res = ctx.services.vlm_worker.poll()
+        vlm_res = ctx.services.vlm_worker.poll(kind="direction")
         vlm_key = None
         vlm_dir_ctx = None
 
@@ -77,6 +77,13 @@ class ObjectNavPolicy(BaseNavigationPolicy):
                 elif parsed_dir in ("j", "k", "l"):
                     vlm_key = parsed_dir
                     vlm_dir_ctx = vlm_res.context
+                else:
+                    # legacy 在无法解析方向时会释放本轮请求并按节流重试；
+                    # 若保留 True，后续帧会一直等待一个已经消费的结果。
+                    ctx.auto_vlm_asked = False
+                    return StateDecision(
+                        command_desc="inquiry: invalid vlm direction, retry"
+                    )
             else:
                 ctx.auto_vlm_asked = False
 
