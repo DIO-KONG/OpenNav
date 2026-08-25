@@ -8,7 +8,6 @@ from fsm.decision import FrameSnapshot, StateDecision
 from nav_constants import (
     FOLLOW_LIN_MAX,
     ESCAPE_PATH0_ARRIVE_EPS,
-    PLAN_FAIL_MAX,
 )
 from nav_path import (
     check_nav_point,
@@ -25,6 +24,7 @@ from nav_path import (
 
 class EscapeState(BaseNavState):
     name: str = "ESCAPE"
+    PLAN_FAIL_MAX: int = 10
 
     def __init__(self):
         self.phase: str = "plan"          # "plan" | "path0" | "path1_align" | "fallback_retreat"
@@ -147,7 +147,7 @@ class EscapeState(BaseNavState):
             else:
                 ctx.clear_active_path()
                 self.plan_fail_cnt += 1
-                if self.plan_fail_cnt >= PLAN_FAIL_MAX:
+                if self.plan_fail_cnt >= self.PLAN_FAIL_MAX:
                     self.phase = "fallback_retreat"
                     self.escape_dir = find_escape_dir((cur_pose[0], cur_pose[1]), esc_tree, fixed_y=fixed_y)
                     return StateDecision(command_desc="intrusion: plan failed max -> fallback retreat")

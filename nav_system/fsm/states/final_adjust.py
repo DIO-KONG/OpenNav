@@ -13,6 +13,8 @@ from nav_constants import (
     FINAL_ADJUST_FORCE_TIME,
     FINAL_ADJUST_SMOOTH_ALPHA,
     FINAL_ADJUST_REJECT_DIST,
+    FOLLOW_STRAIGHT_ALPHA,
+    FOLLOW_DEADBAND,
 )
 from nav_path import check_nav_point, resolve_nav_goal, plan_goal_resolution, plan_path, follow_path_step
 from nav_helpers import _cmd_str
@@ -121,15 +123,15 @@ class FinalAdjustState(BaseNavState):
                 return StateDecision(command_desc="final_adjust: path connecting...", reset_motion=True)
 
         # 4. 纯追踪低速逼近
-        cmd, next_idx, lookahead = follow_path_step(
+        sm_yaw = ctx.yaw_smoother.update(cur_pose[2])
+        sm_pose = (cur_pose[0], cur_pose[1], sm_yaw)
+        cmd, next_idx, lookahead, alpha = follow_path_step(
             ctx.path,
             ctx.path_idx,
-            cur_pose,
-            yaw_smoother=ctx.yaw_smoother,
-            output_smoother=ctx.out_smoother,
-            obstacle_points=snapshot.obs_current,
-            obstacle_snapshot=snapshot.obstacle_snapshot,
+            sm_pose,
         )
+        deadband = 0.0 if abs(alpha) > FOLLOW_STRAIGHT_ALPHA else FOLLOW_DEADBAND
+        cmd = (cmd[0], ctx.out_smoother.update(cmd[1], deadband=deadband))
         ctx.path_idx = next_idx
         ctx.lookahead_target = lookahead
 
