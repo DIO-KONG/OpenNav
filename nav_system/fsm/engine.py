@@ -33,6 +33,8 @@ class NavigationStateMachine:
         prev_state = self.current_state
         next_state = self._get_or_create_state(next_state_cls)
 
+        print(f"\033[92m[FSM] State Changed: {prev_state.name} -> {next_state.name}\033[0m")
+
         # 1. 触发前置状态退出清理
         prev_state.on_exit(self.context, snapshot)
 

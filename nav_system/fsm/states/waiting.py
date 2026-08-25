@@ -21,23 +21,23 @@ class WaitingState(BaseNavState):
         cur_pose = snapshot.cur_pose
         mode = snapshot.slam_mode
 
-        if not ctx.boot_scan_done and cur_pose is not None:
-            if mode is not None and getattr(mode, "name", "") == "TRACKING":
-                if BOOT_SCAN_ENABLED:
-                    ctx.boot_scan_done = True
-                    return StateDecision(
-                        next_state=ScanningState,
-                        command_desc="waiting -> scanning (boot scan)",
-                        reset_motion=True,
-                    )
-                else:
-                    ctx.boot_scan_done = True
-                    ctx.auto_vlm_asked = False
-                    ctx.vlm_reask_pending = False
-                    return StateDecision(
-                        next_state=InquiryState,
-                        command_desc="waiting -> inquiry (boot scan disabled)",
-                        reset_motion=True,
-                    )
+        # 当 SLAM 进入正常 TRACKING 且已获得有效地面位姿时，触发开局任务
+        if cur_pose is not None and mode is not None and getattr(mode, "name", "") == "TRACKING":
+            if not ctx.boot_scan_done and BOOT_SCAN_ENABLED:
+                ctx.boot_scan_done = True
+                return StateDecision(
+                    next_state=ScanningState,
+                    command_desc="waiting -> scanning (boot scan)",
+                    reset_motion=True,
+                )
+            else:
+                ctx.boot_scan_done = True
+                ctx.auto_vlm_asked = False
+                ctx.vlm_reask_pending = False
+                return StateDecision(
+                    next_state=InquiryState,
+                    command_desc="waiting -> inquiry",
+                    reset_motion=True,
+                )
 
         return StateDecision(command_desc="idle (waiting for pose/ready)", reset_motion=True)
