@@ -1,54 +1,73 @@
-# ==========================
-# 开发调试相关
-# ==========================
-wenhao
-episodes/ep*
-saved_images
-__pycache__
-.venv
-*.run
-debug*
-wenhao/masterslam
-wenhao/MASt3R-SLAM
+# ==========================================
+# 🐍 Python 与虚拟环境 (Python & VirtualEnv)
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ==========================================
+# 🤖 机器人 / ROS / SLAM 相关产物 (ROS & SLAM)
+# ==========================================
+devel/
+install/
+build/
+.catkin_workspace
+.catkin_tools/
+.ros/
+*.bag
 *.ply
-*debug
-*output
-*.png
-nav_memory_backup
-vlm_pairs
-# ==========================
-# 🚫 媒体与大文件 (Media & Large Files)
-# ==========================
-# 视频文件
-*.mp4
-*.avi
-*.mov
-*.mkv
-*.flv
-*.wmv
+*.pcd
+*.las
+*.pts
 
-# 音频文件
-*.mp3
-*.wav
-*.flac
-*.aac
+# ==========================================
+# 💾 运行日志、调试与本地数据 (Logs & Debug Artifacts)
+# ==========================================
+logs/
+*.log
+saved_images/
+nav_memory_backup/
+vlm_pairs/
+debug*
+*debug/
+*output/
+episodes/ep*
+wenhao/
 
-# 图像大文件 (如 RAW 或 PSD)
-*.psd
-*.raw
-*.tiff
-
-# ==========================
-# 📦 数据与模型 (Data & Models)
-# ==========================
-# 数据集目录
+# ==========================================
+# 📦 模型权重与数据集 (Model Weights & Datasets)
+# ==========================================
+checkpoints/
 data/
 dataset/
 datasets/
 raw_data/
 
-# 数据文件
-*.csv
+*.pth
+*.pt
+*.ckpt
+*.bin
+*.model
+*.weights
+*.onnx
+*.engine
+*.pb
+*.tflite
+*.safetensors
+
+# ==========================================
+# 📊 二进制与大型数据文件 (Data Files)
+# ==========================================
 *.h5
 *.hdf5
 *.pkl
@@ -57,50 +76,61 @@ raw_data/
 *.npz
 *.parquet
 *.dat
+*.db
+*.sqlite3
 
-# 模型权重/检查点
-checkpoints/
-*.pth
-*.pt
-*.ckpt
-*.model
-*.weights
-*.pb
-*.onnx
-*.bin
+# ==========================================
+# 🎥 多媒体大文件 (Media Files)
+# ==========================================
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.flv
+*.wmv
+*.mp3
+*.wav
+*.flac
+*.aac
 
-# ==========================
-# 🗜️ 压缩包与构建产物 (Archives & Build)
-# ==========================
+# ==========================================
+# 🗜️ 压缩包与二进制可执行文件 (Archives & Binaries)
+# ==========================================
 *.zip
 *.tar
 *.tar.gz
+*.tgz
 *.rar
 *.7z
 *.iso
 *.img
 *.exe
 *.msi
+*.dll
+*.dylib
 
-# 构建与临时目录
-build/
-dist/
-out/
-temp/
-tmp/
-cache/
-logs/
-*.log
-Qwens
-__pycache__
-wenhao/masterslam
-
-# ==========================
-# 🛠️ IDE 与系统文件 (IDE & OS)
-# ==========================
+# ==========================================
+# 🛠️ IDE 与操作系统 (IDE & OS Specific)
+# ==========================================
 .vscode/
 .idea/
+*.sublime-project
+*.sublime-workspace
 *.swp
 *.swo
+*~
 .DS_Store
 Thumbs.db
+Desktop.ini
+
+# ==========================================
+# 🔐 本地配置与敏感凭据 (Secrets & Local Config)
+# ==========================================
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.secret
+credentials.json
+token.json
