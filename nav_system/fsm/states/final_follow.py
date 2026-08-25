@@ -17,7 +17,7 @@ from nav_constants import (
     FOLLOW_DEADBAND,
 )
 from nav_control import _angle_diff
-from nav_path import check_nav_point, check_nav_segment, check_nav_path, follow_path_step
+from nav_path import check_nav_point, check_nav_segment, follow_path_step
 from nav_helpers import _cmd_str
 from nav_memory.frontier_grid import detect_front_wall
 
@@ -185,7 +185,10 @@ class FinalFollowState(BaseNavState):
         # ----------------------------------------------------
         # 4. 剩余路径碰撞复检
         # ----------------------------------------------------
-        path_check = check_nav_path(path, snapshot.obstacle_snapshot, start_idx=ctx.path_idx, current_pose=cur_pose)
+        path_check = ctx.runtime.validate_remaining_path(
+            path, ctx.path_idx, (cur_pose[0], cur_pose[1]),
+            snapshot.obstacle_snapshot,
+        )
         if not path_check.safe:
             if now - self.last_replan_t >= 1.0:
                 self.last_replan_t = now

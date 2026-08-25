@@ -21,6 +21,7 @@ from nav_constants import (
 )
 from nav_control import _angle_diff
 from nav_helpers import _odom_nav_pose, extract_target_3d_from_snapshot, _get_accumulated_map
+from nav_runtime import NavigationRuntime
 from nav_vlm import VlmJob
 
 if TYPE_CHECKING:
@@ -35,6 +36,9 @@ class NavContext:
     def __init__(self, services: NavServices, policy: BaseNavigationPolicy):
         self.services = services
         self.policy = policy
+        # 复用 legacy 的剩余路径校验缓存，避免 FOLLOW 每帧重复扫描同一
+        # 条路径；缓存会按路径对象、waypoint 索引和障碍快照版本失效。
+        self.runtime = NavigationRuntime()
 
         # ---- 路线与目标管理 ----
         self.patrol_target: Optional[tuple] = None          # (x, z) 巡逻语义目标
@@ -109,6 +113,7 @@ class NavContext:
         """清空当前活跃路径。"""
         self.path = None
         self.path_idx = 0
+        self.runtime.invalidate_path_validation()
 
     def clear_patrol(self, clear_target: bool = True):
         """清理巡逻目标与站位。"""
