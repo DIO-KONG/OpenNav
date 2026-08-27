@@ -90,7 +90,7 @@ POST_ESCAPE_CONVERGE_YAW = 0.10           # SLAM 航向与 Odom 追平角度阈�
 OBJ_DET_PERIOD = 2.0                      # 巡逻期间目标检测周期 (s)
 AUTO_VLM_RETRY_PERIOD = 3.0               # VLM 方向问询失败时的重试间隔 (s)
 VLM_URL_DEFAULT = "http://localhost:8222/v1"
-VLM_DETECT_TARGET_DEFAULT = "emergency white exit double door with green sign"
+VLM_DETECT_TARGET_DEFAULT = "white plastic stool" # 默认视觉目标检测对象
 
 # 终调视觉伺服 (Final Adjust)
 FINAL_ADJUST_TIME = 20.0                  # 终调最小持续观察时间 (s)

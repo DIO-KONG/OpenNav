@@ -149,20 +149,23 @@ class RelocState(BaseNavState):
             # 取走并释放其它状态遗留的结果（例如刚进入 RELOC 前提交的
             # auto_detect/direction），否则 worker 会一直 busy，RELOC 无法
             # 提交自己的 presence 请求。
-            vlm_res = ctx.services.vlm_worker.poll()
+            vlm_res = ctx.poll_vlm()
             if vlm_res is not None and vlm_res.epoch == ctx.vlm_epoch:
                 if vlm_res.kind == "reloc_presence":
-                    present = vlm_res.error is None and _presence_is_yes(vlm_res.answer)
-                    ctx.policy.register_presence(present, now)
-                    if present and ctx.policy.presence_locked(now):
-                        self.phase = "detect_hold"
-                        self.phase_t = now
-                        ctx.services.motion_thread.stop()
-                        print("[RELOC][PRESENCE] 画面存在目标且门控满足 -> 停止旋转并检测 bbox")
-                    elif present:
-                        print("[RELOC][PRESENCE] 画面存在目标, 窗口未锁定 -> 继续旋转")
+                    if vlm_res.error:
+                        print(f"[RELOC][PRESENCE] VLM 错误: {vlm_res.error}")
                     else:
-                        print("[RELOC][PRESENCE] 画面无目标 -> 继续旋转")
+                        present = _presence_is_yes(vlm_res.answer)
+                        ctx.policy.register_presence(present, now)
+                        if present and ctx.policy.presence_locked(now):
+                            self.phase = "detect_hold"
+                            self.phase_t = now
+                            ctx.services.motion_thread.stop()
+                            print("[RELOC][PRESENCE] 画面存在目标且门控满足 -> 停止旋转并检测 bbox")
+                        elif present:
+                            print("[RELOC][PRESENCE] 画面存在目标, 窗口未锁定 -> 继续旋转")
+                        else:
+                            print("[RELOC][PRESENCE] 画面无目标 -> 继续旋转")
 
                 elif vlm_res.kind == "reloc_detect":
                     if vlm_res.dets and not vlm_res.error:

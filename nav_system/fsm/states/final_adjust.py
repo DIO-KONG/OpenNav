@@ -14,6 +14,7 @@ from nav_constants import (
     FOLLOW_DEADBAND,
     FOLLOW_WAYPOINT_THRESHOLD,
     PATROL_ARRIVE_EPS,
+    ROBOT_RADIUS,
 )
 from nav_path import check_nav_point, resolve_nav_goal, plan_goal_resolution, plan_path, follow_path_step
 from nav_helpers import _cmd_str
@@ -33,6 +34,7 @@ class FinalAdjustState(BaseNavState):
         self.enter_t = snapshot.now
         self.valid_frames = 1
         self.plan_fail_cnt = 0
+        ctx.final_adj_plan_fail_cnt = 0
         self.last_replan_t = snapshot.now
         ctx.clear_active_path()
         ctx.reset_smoothers()
@@ -91,7 +93,11 @@ class FinalAdjustState(BaseNavState):
         ctx.d_tgt = d_tgt
 
         # 障碍物入侵：到达判定之前，与 FOLLOW 共用同一净空语义
-        robot_check = check_nav_point((cur_pose[0], cur_pose[1]), snapshot.obstacle_snapshot)
+        robot_check = check_nav_point(
+            (cur_pose[0], cur_pose[1]),
+            snapshot.obstacle_snapshot,
+            clearance=ROBOT_RADIUS,
+        )
         ctx.d_robot = robot_check.clearance
         if not robot_check.safe:
             ctx.resume_state_cls = FinalAdjustState
@@ -143,11 +149,12 @@ class FinalAdjustState(BaseNavState):
                     if p0_dist < FOLLOW_WAYPOINT_THRESHOLD:
                         ctx.path_idx = 1
                 self.plan_fail_cnt = 0
+                ctx.final_adj_plan_fail_cnt = 0
                 return StateDecision(command_desc="plan pending (adjust)", reset_motion=True)
 
-            self.plan_fail_cnt += 1
-            if self.plan_fail_cnt >= self.PLAN_FAIL_MAX:
-                self.plan_fail_cnt = 0
+            ctx.final_adj_plan_fail_cnt += 1
+            if ctx.final_adj_plan_fail_cnt >= self.PLAN_FAIL_MAX:
+                ctx.final_adj_plan_fail_cnt = 0
                 ctx.final_goal_nav = None
                 ctx.clear_active_path()
                 return StateDecision(
@@ -155,7 +162,10 @@ class FinalAdjustState(BaseNavState):
                     command_desc="final_adjust: repeated plan failure -> final_plan",
                     reset_motion=True,
                 )
-            return StateDecision(command_desc="final_adjust: path connecting...", reset_motion=True)
+            return StateDecision(
+                command_desc=f"final_adjust: path connecting ({ctx.final_adj_plan_fail_cnt})",
+                reset_motion=True,
+            )
 
         d_end = float(np.hypot(path[-1][0] - cur_pose[0], path[-1][1] - cur_pose[1]))
 

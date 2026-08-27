@@ -50,7 +50,7 @@ class ObjectNavPolicy(BaseNavigationPolicy):
             return StateDecision(command_desc="inquiry: waiting pose/img")
 
         # 1. 检查是否有已完成的异步方向问询结果
-        vlm_res = ctx.services.vlm_worker.poll(kind="direction")
+        vlm_res = ctx.poll_vlm(kind="direction")
         vlm_key = None
         vlm_dir_ctx = None
 
@@ -68,6 +68,11 @@ class ObjectNavPolicy(BaseNavigationPolicy):
                             next_state=PatrolPlanState,
                             command_desc=f"inquiry: vlm=F -> frontier {ft}",
                         )
+                    # legacy: 无 frontier 时释放本轮问询，允许按节流重试。
+                    ctx.auto_vlm_asked = False
+                    return StateDecision(
+                        command_desc="inquiry: vlm=F but no frontier, retry"
+                    )
                 elif parsed_dir in ("j", "k", "l"):
                     vlm_key = parsed_dir
                     vlm_dir_ctx = vlm_res.context

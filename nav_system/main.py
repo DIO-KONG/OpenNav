@@ -97,12 +97,40 @@ def handle_global_auto_detection(
     in_escape = isinstance(fsm.current_state, EscapeState)
     slam_reloc = snapshot.slam_mode is not None and getattr(snapshot.slam_mode, "name", "") == "RELOC"
 
-    # RELOC / ESCAPE / DONE 的迟到 auto_detect 不得改当前状态（含超时离开 RelocState 但 SLAM 仍为 RELOC）。
-    if in_reloc or in_done or in_escape or slam_reloc:
+    # 主线程统一消费一个完成结果。属于当前状态的 direction/reloc_* 结果
+    # 暂存给状态处理；其它迟到结果立即丢弃，避免 worker 因结果未取走而 busy。
+    vlm_res = ctx.poll_vlm()
+    if vlm_res is not None and vlm_res.kind != "auto_detect":
+        if vlm_res.kind in ("reloc_presence", "reloc_detect"):
+            ctx.auto_det_t = float(vlm_res.finished_at)
+        elif vlm_res.kind == "direction":
+            ctx.auto_vlm_ask_t = float(vlm_res.finished_at)
+        state_name = fsm.current_state.name
+        reloc_phase = getattr(fsm.current_state, "phase", None)
+        valid = (
+            (vlm_res.kind == "direction" and state_name == "VLM_INQUIRY" and not slam_reloc)
+            or (vlm_res.kind == "reloc_presence" and in_reloc and reloc_phase == "spin")
+            or (vlm_res.kind == "reloc_detect" and in_reloc and reloc_phase == "detect_hold")
+        )
+        if valid:
+            ctx.stash_vlm_result(vlm_res)
+        else:
+            if vlm_res.kind == "direction":
+                ctx.auto_vlm_asked = False
+        vlm_res = None
+
+    # RELOC / ESCAPE / DONE 的迟到 auto_detect 不得改当前状态。
+    # RELOC 截获目标后已进入 FINAL_ADJUST 时，legacy 允许继续做终调检测，
+    # 即使 SLAM 尚未从 RELOC 切回 TRACKING。
+    suppress_auto = in_reloc or in_done or in_escape or (
+        slam_reloc and not (in_adjust and ctx.reloc_giveup)
+    )
+    if suppress_auto:
+        if vlm_res is not None and vlm_res.kind == "auto_detect":
+            ctx.auto_det_t = float(vlm_res.finished_at)
         return
 
     # 1. 消费已完成的异步检测任务
-    vlm_res = ctx.services.vlm_worker.poll(kind="auto_detect")
     if vlm_res is not None and vlm_res.kind == "auto_detect":
         ctx.auto_det_t = float(vlm_res.finished_at)
         if vlm_res.epoch == ctx.vlm_epoch and not vlm_res.error:
@@ -186,7 +214,12 @@ def handle_global_auto_detection(
     # 2. 周期提交检测任务
     det_period = FINAL_ADJUST_DET_PERIOD if in_adjust else OBJ_DET_PERIOD
     should_det = (ctx.final_target is None and not in_adjust) or in_adjust
+    can_submit = not (in_reloc or in_done or in_escape) and (
+        not slam_reloc or (in_adjust and ctx.reloc_giveup)
+    )
     if (
+        can_submit
+        and
         now - ctx.auto_det_t >= det_period
         and should_det
         and img is not None

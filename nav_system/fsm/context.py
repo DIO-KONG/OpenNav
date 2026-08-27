@@ -92,6 +92,9 @@ class NavContext:
         self.vlm_epoch: int = 0
         self.vlm_request_id: int = 0
         self.vlm_latest: tuple = (None, None)  # (dets, masks)
+        # 主循环统一接收 VLM 完成结果；属于具体状态的结果暂存在这里，
+        # 由对应状态在本帧随后取走，避免跨状态迟到结果卡住 worker。
+        self.pending_vlm_results: list = []
         self.presence_confirmed: bool = False
         self.auto_vlm_asked: bool = False
         self.auto_vlm_ask_t: float = 0.0
@@ -109,10 +112,25 @@ class NavContext:
         self.patrol_plan_fail_cnt: int = 0
         self.final_plan_fail_cnt: int = 0
         self.final_plan_retry_t: float = 0.0
+        self.final_adj_plan_fail_cnt: int = 0
 
     def invalidate_vlm(self, reason: str = ""):
         """使所有未完成的异步 VLM HTTP 任务失效。"""
         self.vlm_epoch += 1
+
+    def stash_vlm_result(self, result) -> None:
+        """暂存主循环收到、等待具体状态消费的 VLM 结果。"""
+        self.pending_vlm_results.append(result)
+
+    def poll_vlm(self, kind=None):
+        """优先取主循环暂存结果，否则从 worker 非阻塞取结果。"""
+        allowed = None
+        if kind is not None:
+            allowed = {kind} if isinstance(kind, str) else set(kind)
+        for idx, result in enumerate(self.pending_vlm_results):
+            if allowed is None or result.kind in allowed:
+                return self.pending_vlm_results.pop(idx)
+        return self.services.vlm_worker.poll(kind=kind)
 
     def clear_active_path(self):
         """清空当前活跃路径。"""
@@ -159,6 +177,7 @@ class NavContext:
         """接受新最终目标时清零 FINAL_PLAN 失败计数与冷却。"""
         self.final_plan_fail_cnt = 0
         self.final_plan_retry_t = 0.0
+        self.final_adj_plan_fail_cnt = 0
 
     def reset_smoothers(self):
         """重置航向与速度输出平滑器。"""

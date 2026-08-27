@@ -15,9 +15,17 @@ from nav_constants import (
     PRETURN_RETREAT_TIMEOUT,
     FOLLOW_STRAIGHT_ALPHA,
     FOLLOW_DEADBAND,
+    FOLLOW_WAYPOINT_THRESHOLD,
 )
 from nav_control import _angle_diff
-from nav_path import check_nav_point, check_nav_segment, follow_path_step
+from nav_path import (
+    check_nav_point,
+    check_nav_segment,
+    follow_path_step,
+    resolve_nav_goal,
+    plan_goal_resolution,
+    plan_path,
+)
 from nav_helpers import _cmd_str
 from nav_memory.frontier_grid import detect_front_wall
 
@@ -34,6 +42,43 @@ class FinalFollowState(BaseNavState):
         self.preturn_last_tick: float = 0.0
         self.last_replan_t: float = 0.0
 
+    def _maybe_arm_preturn(self, ctx: "NavContext", snapshot: FrameSnapshot) -> None:
+        """与 legacy `_arm_preturn` 对齐，在新路径建立后检查近墙大角度回退。"""
+        self.preturn_active = False
+        cur_pose = snapshot.cur_pose
+        path = ctx.path
+        if (
+            cur_pose is None
+            or path is None
+            or len(path) < 2
+            or snapshot.odom_pose is None
+            or snapshot.slam_mode is None
+            or getattr(snapshot.slam_mode, "name", "") != "TRACKING"
+        ):
+            return
+        dx = float(path[1][0]) - float(cur_pose[0])
+        dz = float(path[1][1]) - float(cur_pose[1])
+        if np.hypot(dx, dz) <= 1e-6:
+            return
+        target_yaw = float(np.arctan2(dx, dz))
+        turn_deg = abs(float(np.degrees(_angle_diff(target_yaw, float(cur_pose[2])))))
+        if turn_deg < PRETURN_MIN_TURN_DEG:
+            return
+        wall = detect_front_wall(
+            (cur_pose[0], cur_pose[1]), cur_pose[2], snapshot.obs_current
+        )
+        if not wall.detected:
+            return
+        self.preturn_start_pose = (
+            float(cur_pose[0]), float(cur_pose[1]), float(cur_pose[2])
+        )
+        self.preturn_slam_anchor = self.preturn_start_pose
+        self.preturn_odom_anchor = tuple(float(v) for v in snapshot.odom_pose)
+        self.preturn_active_time = 0.0
+        self.preturn_last_tick = snapshot.now
+        self.preturn_active = True
+        ctx.post_escape = False
+
     def on_enter(self, ctx: "NavContext", snapshot: FrameSnapshot) -> None:
         self.preturn_active = False
         self.preturn_start_pose = None
@@ -43,31 +88,7 @@ class FinalFollowState(BaseNavState):
         self.preturn_last_tick = snapshot.now
         ctx.reset_smoothers()
 
-        cur_pose = snapshot.cur_pose
-        path = ctx.path
-        if (
-            cur_pose is not None
-            and path is not None
-            and len(path) >= 2
-            and snapshot.odom_pose is not None
-            and snapshot.slam_mode is not None
-            and getattr(snapshot.slam_mode, "name", "") == "TRACKING"
-        ):
-            dx = float(path[1][0]) - float(cur_pose[0])
-            dz = float(path[1][1]) - float(cur_pose[1])
-            if np.hypot(dx, dz) > 1e-6:
-                target_yaw = float(np.arctan2(dx, dz))
-                turn_deg = abs(float(np.degrees(_angle_diff(target_yaw, float(cur_pose[2])))))
-                if turn_deg >= PRETURN_MIN_TURN_DEG:
-                    wall = detect_front_wall((cur_pose[0], cur_pose[1]), cur_pose[2], snapshot.obs_current)
-                    if wall.detected:
-                        self.preturn_start_pose = (float(cur_pose[0]), float(cur_pose[1]), float(cur_pose[2]))
-                        self.preturn_slam_anchor = self.preturn_start_pose
-                        self.preturn_odom_anchor = tuple(float(v) for v in snapshot.odom_pose)
-                        self.preturn_active_time = 0.0
-                        self.preturn_last_tick = snapshot.now
-                        self.preturn_active = True
-                        ctx.post_escape = False
+        self._maybe_arm_preturn(ctx, snapshot)
 
     def on_update(self, ctx: "NavContext", snapshot: FrameSnapshot) -> StateDecision:
         from fsm.states.done import DoneState
@@ -145,33 +166,77 @@ class FinalFollowState(BaseNavState):
         # 2. 到达判定
         # ----------------------------------------------------
         path = ctx.path
-        if path is None or len(path) == 0:
-            return StateDecision(next_state=FinalPlanState, command_desc="no path -> final_plan", reset_motion=True)
-
         nav_pt = ctx.final_goal_nav if ctx.final_goal_nav is not None else ctx.final_target
         if nav_pt is None:
             return StateDecision(command_desc="no target -> stop", reset_motion=True)
 
+        if path is None or len(path) == 0:
+            # legacy 在 FINAL_FOLLOW 内直接重规划，不先切到 FINAL_PLAN。
+            plan_start_2d = (
+                (ctx.plan_pose[0], ctx.plan_pose[1]) if ctx.plan_pose is not None else None
+            )
+            if ctx.final_goal_nav is None or not check_nav_point(
+                ctx.final_goal_nav, snapshot.obstacle_snapshot
+            ).safe:
+                resolution = resolve_nav_goal(
+                    ctx.final_target,
+                    (cur_pose[0], cur_pose[1]),
+                    snapshot.obstacle_snapshot,
+                )
+                path, _actual_goal, selected = plan_goal_resolution(
+                    (cur_pose[0], cur_pose[1]),
+                    resolution,
+                    snapshot.obs_current,
+                    fixed_y=snapshot.nav_y,
+                    plan_start_2d=plan_start_2d,
+                    obstacle_snapshot=snapshot.obstacle_snapshot,
+                )
+                ctx.final_goal_nav = selected.goal
+            else:
+                path, _actual_goal = plan_path(
+                    (cur_pose[0], cur_pose[1]),
+                    ctx.final_goal_nav,
+                    snapshot.obs_current,
+                    fixed_y=snapshot.nav_y,
+                    plan_start_2d=plan_start_2d,
+                    obstacle_snapshot=snapshot.obstacle_snapshot,
+                )
+
+            if path is not None and len(path) > 0:
+                ctx.path = path
+                ctx.path_idx = 0
+                if len(path) > 1:
+                    p0_dist = float(np.hypot(
+                        float(path[0][0]) - float(cur_pose[0]),
+                        float(path[0][1]) - float(cur_pose[1]),
+                    ))
+                    if p0_dist < FOLLOW_WAYPOINT_THRESHOLD:
+                        ctx.path_idx = 1
+                ctx.final_adj_plan_fail_cnt = 0
+                ctx.reset_smoothers()
+                self._maybe_arm_preturn(ctx, snapshot)
+                return StateDecision(
+                    command_desc="plan pending (final follow)", reset_motion=True
+                )
+
+            ctx.final_adj_plan_fail_cnt += 1
+            if ctx.final_adj_plan_fail_cnt >= self.PLAN_FAIL_MAX:
+                ctx.final_adj_plan_fail_cnt = 0
+                ctx.final_goal_nav = None
+                ctx.clear_active_path()
+                return StateDecision(
+                    next_state=FinalPlanState,
+                    command_desc="final follow: repeated plan failure -> final_plan",
+                    reset_motion=True,
+                )
+            return StateDecision(
+                command_desc=f"final follow: path connecting ({ctx.final_adj_plan_fail_cnt})",
+                reset_motion=True,
+            )
+
         d_tgt = np.hypot(nav_pt[0] - cur_pose[0], nav_pt[1] - cur_pose[1])
         d_end = np.hypot(path[-1][0] - cur_pose[0], path[-1][1] - cur_pose[1])
         ctx.d_tgt = d_tgt
-
-        if d_tgt <= PATROL_ARRIVE_EPS or d_end <= PATROL_ARRIVE_EPS:
-            ctx.clear_active_path()
-            ctx.invalidate_vlm("done")
-            return StateDecision(
-                next_state=DoneState,
-                command_desc="FINAL_FOLLOW -> DONE (goal reached)",
-                reset_motion=True,
-            )
-
-        if ctx.path_idx >= len(path):
-            ctx.clear_active_path()
-            return StateDecision(
-                next_state=FinalPlanState,
-                command_desc="final path exhausted, target remaining -> replan",
-                reset_motion=True,
-            )
 
         # ----------------------------------------------------
         # 3. 障碍物入侵检测
@@ -187,6 +252,23 @@ class FinalFollowState(BaseNavState):
             return StateDecision(
                 next_state=EscapeState,
                 command_desc=f"intrusion detected (clr={robot_check.clearance:.2f}m) -> escape",
+                reset_motion=True,
+            )
+
+        if d_tgt <= PATROL_ARRIVE_EPS or d_end <= PATROL_ARRIVE_EPS:
+            ctx.clear_active_path()
+            ctx.invalidate_vlm("done")
+            return StateDecision(
+                next_state=DoneState,
+                command_desc="FINAL_FOLLOW -> DONE (goal reached)",
+                reset_motion=True,
+            )
+
+        if ctx.path_idx >= len(path):
+            ctx.clear_active_path()
+            return StateDecision(
+                next_state=FinalPlanState,
+                command_desc="final path exhausted, target remaining -> replan",
                 reset_motion=True,
             )
 
