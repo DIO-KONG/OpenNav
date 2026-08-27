@@ -154,11 +154,13 @@ class RelocState(BaseNavState):
                 if vlm_res.kind == "reloc_presence":
                     present = vlm_res.error is None and _presence_is_yes(vlm_res.answer)
                     ctx.policy.register_presence(present, now)
-                    if present:
+                    if present and ctx.policy.presence_locked(now):
                         self.phase = "detect_hold"
                         self.phase_t = now
                         ctx.services.motion_thread.stop()
-                        print("[RELOC][PRESENCE] 画面存在目标 -> 停止旋转并检测 bbox")
+                        print("[RELOC][PRESENCE] 画面存在目标且门控满足 -> 停止旋转并检测 bbox")
+                    elif present:
+                        print("[RELOC][PRESENCE] 画面存在目标, 窗口未锁定 -> 继续旋转")
                     else:
                         print("[RELOC][PRESENCE] 画面无目标 -> 继续旋转")
 

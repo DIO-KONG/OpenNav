@@ -34,6 +34,14 @@ class BaseNavigationPolicy(ABC):
         """注册一次 presence 测量结果 (供滑动窗口策略统计)。"""
         pass
 
+    def presence_locked(self, now: float) -> bool:
+        """RELOC spin 是否允许因 presence 进入 detect_hold。
+
+        Object/Frontier: 单次 yes 即可 (默认 True，由调用方再与 present 合取)。
+        Open: 覆盖为滑动窗口锁定。
+        """
+        return True
+
     def reset_presence_window(self, reason: str = "") -> None:
         """重置存在性滑动窗口 (切换状态时调用)。"""
         pass

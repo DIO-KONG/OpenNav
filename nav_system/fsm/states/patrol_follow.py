@@ -160,7 +160,7 @@ class PatrolFollowState(BaseNavState):
 
         arrive_eps = FRONTIER_ARRIVE_EPS if ctx.patrol_source == "frontier" else PATROL_ARRIVE_EPS
 
-        if d_tgt <= arrive_eps or d_end <= arrive_eps or ctx.path_idx >= len(path):
+        if d_tgt <= arrive_eps or d_end <= arrive_eps:
             ctx.clear_patrol(clear_target=True)
             ctx.clear_active_path()
             ctx.auto_vlm_asked = False
@@ -168,6 +168,14 @@ class PatrolFollowState(BaseNavState):
             return StateDecision(
                 next_state=InquiryState,
                 command_desc="patrol waypoint reached -> inquiry",
+                reset_motion=True,
+            )
+
+        if ctx.path_idx >= len(path):
+            ctx.clear_active_path()
+            return StateDecision(
+                next_state=PatrolPlanState,
+                command_desc="patrol path exhausted, target remaining -> replan",
                 reset_motion=True,
             )
 
@@ -221,6 +229,7 @@ class PatrolFollowState(BaseNavState):
                     command_desc=f"path blocked ({path_check.reason}) -> replan",
                     reset_motion=True,
                 )
+            return StateDecision(command_desc="stop (replan cooldown)", reset_motion=True)
 
         # ----------------------------------------------------
         # 6. 纯追踪步进控制计算
@@ -236,6 +245,24 @@ class PatrolFollowState(BaseNavState):
         cmd = (cmd[0], ctx.out_smoother.update(cmd[1], deadband=deadband))
         ctx.path_idx = next_idx
         ctx.lookahead_target = lookahead
+
+        if ctx.path_idx >= len(path):
+            if d_tgt <= arrive_eps:
+                ctx.clear_patrol(clear_target=True)
+                ctx.clear_active_path()
+                ctx.auto_vlm_asked = False
+                ctx.vlm_reask_pending = False
+                return StateDecision(
+                    next_state=InquiryState,
+                    command_desc="patrol path done, at goal -> inquiry",
+                    reset_motion=True,
+                )
+            ctx.clear_active_path()
+            return StateDecision(
+                next_state=PatrolPlanState,
+                command_desc="patrol path exhausted, target remaining -> replan",
+                reset_motion=True,
+            )
 
         ctx.log_action("FOLLOW", "MotionThread(continuous cmd_vel)", f"pts={len(path)} idx={ctx.path_idx}")
         return StateDecision(

@@ -2,7 +2,6 @@
 """最终目标规划状态 (FinalPlanState)：解析锁定目标的安全站位并进行全局 RRT* 规划。"""
 from __future__ import annotations
 
-import time
 from fsm.base_state import BaseNavState
 from fsm.decision import FrameSnapshot, StateDecision
 from nav_path import check_nav_point, resolve_nav_goal, plan_goal_resolution, plan_path
@@ -11,6 +10,7 @@ from nav_path import check_nav_point, resolve_nav_goal, plan_goal_resolution, pl
 class FinalPlanState(BaseNavState):
     name: str = "FINAL_PLAN"
     PLAN_FAIL_MAX: int = 10
+    PLAN_RETRY_COOLDOWN: float = 2.0
 
     def __init__(self):
         self.plan_fail_cnt: int = 0
@@ -22,13 +22,16 @@ class FinalPlanState(BaseNavState):
 
     def on_update(self, ctx: "NavContext", snapshot: FrameSnapshot) -> StateDecision:
         from fsm.states.final_follow import FinalFollowState
-        from fsm.states.waiting import WaitingState
 
         cur_pose = snapshot.cur_pose
         target = ctx.final_target
+        now = snapshot.now
 
         if cur_pose is None or target is None:
             return StateDecision(command_desc="final_plan: waiting pose/target", reset_motion=True)
+
+        if now < self.retry_t:
+            return StateDecision(command_desc="final plan retry cooldown", reset_motion=True)
 
         plan_start_2d = (
             (ctx.plan_pose[0], ctx.plan_pose[1]) if ctx.plan_pose is not None else None
@@ -66,6 +69,7 @@ class FinalPlanState(BaseNavState):
             ctx.path = path
             ctx.path_idx = 0
             self.plan_fail_cnt = 0
+            self.retry_t = 0.0
             return StateDecision(
                 next_state=FinalFollowState,
                 command_desc=f"final_plan: path ready (len={len(path)})",
@@ -73,13 +77,17 @@ class FinalPlanState(BaseNavState):
             )
 
         self.plan_fail_cnt += 1
+        self.retry_t = now + self.PLAN_RETRY_COOLDOWN
         if self.plan_fail_cnt >= self.PLAN_FAIL_MAX:
-            print(f"[nav_2d][WARN] FINAL 规划不成功 (连续 {self.plan_fail_cnt} 次失败) -> 释放目标回 WAITING")
-            ctx.clear_final(clear_target=True)
+            self.plan_fail_cnt = 0
+            ctx.clear_final(clear_target=False)
             ctx.clear_active_path()
+            print(
+                "[nav_2d][WARN] FINAL 路径连续失败，"
+                "清除导航站位并等待地图更新后重新解析"
+            )
             return StateDecision(
-                next_state=WaitingState,
-                command_desc="final_plan failed max -> waiting",
+                command_desc="final_plan failed max; keep target, wait map",
                 reset_motion=True,
             )
 

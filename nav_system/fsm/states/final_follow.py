@@ -156,12 +156,20 @@ class FinalFollowState(BaseNavState):
         d_end = np.hypot(path[-1][0] - cur_pose[0], path[-1][1] - cur_pose[1])
         ctx.d_tgt = d_tgt
 
-        if d_tgt <= PATROL_ARRIVE_EPS or d_end <= PATROL_ARRIVE_EPS or ctx.path_idx >= len(path):
+        if d_tgt <= PATROL_ARRIVE_EPS or d_end <= PATROL_ARRIVE_EPS:
             ctx.clear_active_path()
             ctx.invalidate_vlm("done")
             return StateDecision(
                 next_state=DoneState,
                 command_desc="FINAL_FOLLOW -> DONE (goal reached)",
+                reset_motion=True,
+            )
+
+        if ctx.path_idx >= len(path):
+            ctx.clear_active_path()
+            return StateDecision(
+                next_state=FinalPlanState,
+                command_desc="final path exhausted, target remaining -> replan",
                 reset_motion=True,
             )
 
@@ -200,6 +208,7 @@ class FinalFollowState(BaseNavState):
                     command_desc=f"final path blocked ({path_check.reason}) -> replan",
                     reset_motion=True,
                 )
+            return StateDecision(command_desc="stop (replan cooldown)", reset_motion=True)
 
         # ----------------------------------------------------
         # 5. 纯追踪控制计算
@@ -215,6 +224,22 @@ class FinalFollowState(BaseNavState):
         cmd = (cmd[0], ctx.out_smoother.update(cmd[1], deadband=deadband))
         ctx.path_idx = next_idx
         ctx.lookahead_target = lookahead
+
+        if ctx.path_idx >= len(path):
+            if d_tgt <= PATROL_ARRIVE_EPS:
+                ctx.clear_active_path()
+                ctx.invalidate_vlm("done")
+                return StateDecision(
+                    next_state=DoneState,
+                    command_desc="FINAL_FOLLOW -> DONE (path done, at goal)",
+                    reset_motion=True,
+                )
+            ctx.clear_active_path()
+            return StateDecision(
+                next_state=FinalPlanState,
+                command_desc="final path exhausted, target remaining -> replan",
+                reset_motion=True,
+            )
 
         ctx.log_action("FINAL_FOLLOW", "MotionThread", f"following pts={len(path)} idx={ctx.path_idx}")
         return StateDecision(

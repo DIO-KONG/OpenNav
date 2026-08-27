@@ -41,6 +41,9 @@ class OpenNavPolicy(ObjectNavPolicy):
             return False
         return (now - win[0][0]) >= self.PRESENCE_SUSTAIN
 
+    def presence_locked(self, now: float) -> bool:
+        return self._is_presence_locked(now)
+
     def should_accept_final_adjust(
         self, ctx: "NavContext", snapshot: FrameSnapshot, target_3d: tuple
     ) -> bool:

@@ -42,45 +42,45 @@
 - **legacy 正确逻辑**：关键字 `if _reloc_giveup and (mode is None or mode.name != "RELOC")`、`patrol_goal_nav = None`、`final_goal_nav = None`、`state = NavState.PATROL_PLAN/FINAL_PLAN`。
 - **重构错误位置**：`nav_system/fsm/states/reloc.py` 关键字 `RELOC timeout`；`nav_system/main.py` 仅检查 `context.reloc_giveup`，没有对应的放弃后清理分支。
 
-### P1
+### P1（已完成）
 
-#### 6. Open 模式 RELOC presence 使用滑动窗口门控
+#### 6. Open 模式 RELOC presence 使用滑动窗口门控 ✅
 
 - **修复指导**：Open 模式中单次 `present=True` 不得立即进入 `detect_hold`；必须满足 10 个样本、yes 比例至少 80%、时间跨度至少 5 秒后才停车并检测 bbox。Object/Frontier 保持 legacy 的单次 presence 语义。
 - **legacy 正确逻辑**：`legacy/navvlm_open.py` 关键字 `_present_register`、`_present_locked`、`presence_yes_locked`；Object/Frontier 对应 `reloc_presence` 分支为单次 yes 即 `detect_hold`。
 - **重构错误位置**：`nav_system/fsm/states/reloc.py` 关键字 `if present: self.phase = "detect_hold"`；当前没有按 policy 区分 Open 窗口锁定。
 
-#### 7. FINAL_PLAN 连续失败时保留 final_target
+#### 7. FINAL_PLAN 连续失败时保留 final_target ✅
 
 - **修复指导**：达到失败阈值时只清除失效的 `final_goal_nav`，保留 `final_target`，等待地图更新后重新解析规划；不得直接 `clear_final(clear_target=True)` 回到 WAITING。
 - **legacy 正确逻辑**：`legacy/navvlm_object.py` / `legacy/navvlm_open.py` / `legacy/nav_frontier.py` 关键字 `FINAL 路径连续失败`、`final_goal_nav = None`、`_final_plan_retry_t`。
 - **重构错误位置**：`nav_system/fsm/states/final_plan.py` 关键字 `plan_fail_cnt >= PLAN_FAIL_MAX`；当前调用 `ctx.clear_final(clear_target=True)` 并切换 `WaitingState`。
 
-#### 8. FINAL_PLAN 实现失败重试冷却
+#### 8. FINAL_PLAN 实现失败重试冷却 ✅
 
 - **修复指导**：使用 `retry_t` 或等价字段，失败后按 legacy 等待约 2 秒再重新规划；成功或新目标时清零冷却。
 - **legacy 正确逻辑**：关键字 `_final_plan_retry_t`、`final plan retry cooldown`、`time.time() + 2.0`。
 - **重构错误位置**：`nav_system/fsm/states/final_plan.py` 定义了 `retry_t` 但未使用，`on_update()` 每帧直接调用规划。
 
-#### 9. FINAL_FOLLOW 路径耗尽但目标未到达时转 FINAL_PLAN
+#### 9. FINAL_FOLLOW 路径耗尽但目标未到达时转 FINAL_PLAN ✅
 
 - **修复指导**：`path_idx >= len(path)` 只能表示当前路径耗尽；若最终目标仍超过到达容差，应清路径并进入 `FINAL_PLAN`，只有目标/末点真正到达才进入 DONE。
 - **legacy 正确逻辑**：关键字 `if path_idx >= len(path)` 位于 FINAL 跟随后的分支；`d_tgt <= PATROL_ARRIVE_EPS` 才 DONE，否则 `state = NavState.FINAL_PLAN`。
 - **重构错误位置**：`nav_system/fsm/states/final_follow.py` 关键字 `if d_tgt <= ... or ... or ctx.path_idx >= len(path)`；当前直接返回 `DoneState`。
 
-#### 10. PATROL_FOLLOW 路径耗尽时区分到达与重新规划
+#### 10. PATROL_FOLLOW 路径耗尽时区分到达与重新规划 ✅
 
 - **修复指导**：路径耗尽但 patrol 目标仍远时进入 `PatrolPlanState`；只有安全站位/末点到达才清除 patrol 目标并进入 `InquiryState`。
 - **legacy 正确逻辑**：`legacy/*` 关键字 `if path_idx >= len(path)`，后续判断 `d_tgt <= _arrive_eps`，否则 `state = NavState.PATROL_PLAN`。
 - **重构错误位置**：`nav_system/fsm/states/patrol_follow.py` 关键字 `d_tgt <= arrive_eps or d_end <= arrive_eps or ctx.path_idx >= len(path)`；当前将三者统一判为已到达。
 
-#### 11. FOLLOW 路径不安全 cooldown 期间停车
+#### 11. FOLLOW 路径不安全 cooldown 期间停车 ✅
 
 - **修复指导**：路径检查不安全且尚未达到重规划冷却时间时，必须立即返回停车决策，禁止继续调用 `follow_path_step()`。
 - **legacy 正确逻辑**：`legacy/navvlm_object.py` / `legacy/navvlm_open.py` / `legacy/nav_frontier.py` 关键字 `stop (replan cooldown)`。
 - **重构错误位置**：`nav_system/fsm/states/patrol_follow.py`、`nav_system/fsm/states/final_follow.py` 关键字 `if not path_check.safe`；当前 cooldown 分支结束后仍落入跟随控制。
 
-#### 12. ESCAPE 成功恢复后清理脱困上下文
+#### 12. ESCAPE 成功恢复后清理脱困上下文 ✅
 
 - **修复指导**：path0 到达或 path1 对准后，除设置路径索引和恢复状态外，还应等价执行 legacy 的 `_reset_intrusion_escape(clear_path0=False)`，清除 resume/target/phase 等一次性上下文，同时保留必要的 path0 锚点信息。
 - **legacy 正确逻辑**：关键字 `_reset_intrusion_escape(clear_path0=False)`、`_escaping = False`、`state = _resume_state`。

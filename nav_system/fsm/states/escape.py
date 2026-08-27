@@ -190,6 +190,7 @@ class EscapeState(BaseNavState):
                 p1_dz = float(ctx.path[1][1]) - float(ctx.path[0][1])
                 if np.hypot(p1_dx, p1_dz) <= 1e-6:
                     ctx.path_idx = 1
+                    ctx.clear_escape()
                     return StateDecision(
                         next_state=resume_cls,
                         command_desc="intrusion: path0 reached -> resume path",
@@ -231,6 +232,7 @@ class EscapeState(BaseNavState):
             el, ea, alpha, p1_aligned = escape_align_to_yaw_velocity(cur_pose, self.path1_yaw)
             if p1_aligned:
                 ctx.path_idx = 1
+                ctx.clear_escape()
                 return StateDecision(
                     next_state=resume_cls,
                     command_desc="intrusion: path1 aligned -> resume follow",
@@ -252,6 +254,7 @@ class EscapeState(BaseNavState):
                 if ctx.escape_replan_from_semantic:
                     if resume_cls.__name__.startswith("Final"):
                         ctx.clear_final(clear_target=False)
+                        ctx.clear_escape()
                         return StateDecision(
                             next_state=FinalPlanState,
                             command_desc="intrusion fallback clear -> reselect final goal",
@@ -259,6 +262,7 @@ class EscapeState(BaseNavState):
                         )
                     else:
                         ctx.clear_patrol(clear_target=False)
+                        ctx.clear_escape()
                         return StateDecision(
                             next_state=PatrolPlanState,
                             command_desc="intrusion fallback clear -> reselect patrol goal",
