@@ -130,6 +130,13 @@ class NavContext:
             self.final_target = None
             self.goal_source = None
 
+    def clear_escape(self):
+        """清理脱困一次性上下文（resume / target / semantic）。"""
+        self.resume_state_cls = None
+        self.escape_target = None
+        self.escape_semantic_target = None
+        self.escape_replan_from_semantic = False
+
     def reset_smoothers(self):
         """重置航向与速度输出平滑器。"""
         self.yaw_smoother.reset()

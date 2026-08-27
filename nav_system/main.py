@@ -47,13 +47,27 @@ from fsm.engine import NavigationStateMachine
 from fsm.decision import FrameSnapshot, StateDecision
 from fsm.states.waiting import WaitingState
 from fsm.states.reloc import RelocState
+from fsm.states.escape import EscapeState
 from fsm.states.final_adjust import FinalAdjustState
+from fsm.states.final_follow import FinalFollowState
+from fsm.states.final_plan import FinalPlanState
+from fsm.states.patrol_follow import PatrolFollowState
+from fsm.states.patrol_plan import PatrolPlanState
 from fsm.states.done import DoneState
 
 from policies.base_policy import BaseNavigationPolicy
 from policies.object_policy import ObjectNavPolicy
 from policies.open_policy import OpenNavPolicy
 from policies.frontier_policy import FrontierNavPolicy
+
+# 全局 auto_detect 只允许从这些状态切入 FINAL_ADJUST。
+# WAITING / ESCAPE / FINAL_* / DONE / RELOC 的迟到结果不得改当前状态。
+_FINAL_ADJUST_ENTRY_STATES = frozenset({
+    "SCANNING",
+    "VLM_INQUIRY",
+    "PATROL_PLAN",
+    "PATROL_FOLLOW",
+})
 
 
 def create_policy(mode: str) -> BaseNavigationPolicy:
@@ -80,8 +94,11 @@ def handle_global_auto_detection(
     in_adjust = isinstance(fsm.current_state, FinalAdjustState)
     in_reloc = isinstance(fsm.current_state, RelocState)
     in_done = isinstance(fsm.current_state, DoneState)
+    in_escape = isinstance(fsm.current_state, EscapeState)
+    slam_reloc = snapshot.slam_mode is not None and getattr(snapshot.slam_mode, "name", "") == "RELOC"
 
-    if in_reloc or in_done:
+    # RELOC / ESCAPE / DONE 的迟到 auto_detect 不得改当前状态（含超时离开 RelocState 但 SLAM 仍为 RELOC）。
+    if in_reloc or in_done or in_escape or slam_reloc:
         return
 
     # 1. 消费已完成的异步检测任务
@@ -143,9 +160,9 @@ def handle_global_auto_detection(
                                 else:
                                     print(f"[nav_auto][DET] EMA 拒收离群测量 (跳变 {jump:.2f}m > {FINAL_ADJUST_REJECT_DIST:.2f}m)")
 
-                        # 巡逻或探索中检测到目标：经由 Policy 门控裁决是否切入终调
+                        # 巡逻或探索中检测到目标：经由 Policy 门控裁决是否接受目标。
+                        # 仅 SCANNING / VLM_INQUIRY / PATROL_* 才切入 FINAL_ADJUST。
                         elif ctx.policy.should_accept_final_adjust(ctx, snapshot, t3d):
-                            ctx.invalidate_vlm("new_final_target")
                             ctx.final_target = (t3d[0], t3d[2])
                             ctx.final_goal_nav = None
                             ctx.goal_source = "vlm_det"
@@ -158,7 +175,10 @@ def handle_global_auto_detection(
                                 "detection": dict(vlm_res.dets[0]),
                             }
                             print(f"[nav_auto][DET] VLM 目标 ({t3d[0]:.2f},{t3d[2]:.2f}) -> FINAL_ADJUST")
-                            fsm.change_state(FinalAdjustState, snapshot)
+                            if fsm.current_state.name in _FINAL_ADJUST_ENTRY_STATES:
+                                ctx.invalidate_vlm("new_final_target")
+                                ctx.clear_active_path()
+                                fsm.change_state(FinalAdjustState, snapshot)
 
     # 2. 周期提交检测任务
     det_period = FINAL_ADJUST_DET_PERIOD if in_adjust else OBJ_DET_PERIOD
@@ -289,8 +309,33 @@ def main():
                 and not isinstance(fsm.current_state, RelocState)
                 and not context.reloc_giveup
             ):
-                context.reloc_prev_state_cls = type(fsm.current_state)
+                if isinstance(fsm.current_state, EscapeState):
+                    saved = context.resume_state_cls
+                    context.reloc_prev_state_cls = saved if saved is not None else WaitingState
+                    context.clear_escape()
+                    context.clear_active_path()
+                    print(
+                        "[INTRUSION] phase=abort reason=tracking_reloc "
+                        f"action=resume_{context.reloc_prev_state_cls.name}"
+                    )
+                else:
+                    context.reloc_prev_state_cls = type(fsm.current_state)
                 fsm.change_state(RelocState, snapshot)
+
+            # RELOC 超时/目标截胡后的 give-up 清理：SLAM 已离开 RELOC 时
+            # 清失效站位与路径，FOLLOW/ADJUST 切回对应 PLAN，并复位标志。
+            if context.reloc_giveup and (
+                slam_mode is None or getattr(slam_mode, "name", "") != "RELOC"
+            ):
+                context.reloc_giveup = False
+                context.clear_patrol(clear_target=False)
+                context.clear_final(clear_target=False)
+                context.clear_active_path()
+                if isinstance(fsm.current_state, PatrolFollowState):
+                    fsm.change_state(PatrolPlanState, snapshot)
+                elif isinstance(fsm.current_state, (FinalFollowState, FinalAdjustState)):
+                    context.final_from_reloc = False
+                    fsm.change_state(FinalPlanState, snapshot)
 
             # ---- 3. 全局目标检测 (视觉截胡) ----
             handle_global_auto_detection(context, snapshot, fsm)

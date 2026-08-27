@@ -15,6 +15,7 @@ from nav_constants import (
     FINAL_ADJUST_REJECT_DIST,
     FOLLOW_STRAIGHT_ALPHA,
     FOLLOW_DEADBAND,
+    FOLLOW_WAYPOINT_THRESHOLD,
 )
 from nav_path import check_nav_point, resolve_nav_goal, plan_goal_resolution, plan_path, follow_path_step
 from nav_helpers import _cmd_str
@@ -22,6 +23,7 @@ from nav_helpers import _cmd_str
 
 class FinalAdjustState(BaseNavState):
     name: str = "FINAL_ADJUST"
+    PLAN_FAIL_MAX: int = 10
 
     def __init__(self):
         self.enter_t: float = 0.0
@@ -117,10 +119,60 @@ class FinalAdjustState(BaseNavState):
             if path is not None and len(path) > 0:
                 ctx.path = path
                 ctx.path_idx = 0
+                # 规划器通常把当前位姿作为 path[0]。legacy 会直接跳过
+                # 该点，否则每次 VLM 更新清空并重规划后，第一帧都会由
+                # follow_path_step 返回 (0, 0)，造成终调运动周期性停顿。
+                if len(path) > 1:
+                    p0_dist = float(np.hypot(
+                        float(path[0][0]) - float(cur_pose[0]),
+                        float(path[0][1]) - float(cur_pose[1]),
+                    ))
+                    if p0_dist < FOLLOW_WAYPOINT_THRESHOLD:
+                        ctx.path_idx = 1
                 self.plan_fail_cnt = 0
             else:
                 self.plan_fail_cnt += 1
+                if self.plan_fail_cnt >= self.PLAN_FAIL_MAX:
+                    self.plan_fail_cnt = 0
+                    ctx.final_goal_nav = None
+                    ctx.clear_active_path()
+                    return StateDecision(
+                        next_state=FinalPlanState,
+                        command_desc="final_adjust: repeated plan failure -> final_plan",
+                        reset_motion=True,
+                    )
                 return StateDecision(command_desc="final_adjust: path connecting...", reset_motion=True)
+
+        # 路径已经走完但尚未满足终调锁定条件时，清空旧路径，下一帧
+        # 重新连接当前目标；否则 follow_path_step 会永久返回零速度。
+        if ctx.path_idx >= len(ctx.path):
+            ctx.clear_active_path()
+            return StateDecision(
+                command_desc="final_adjust: path done, replan pending",
+                reset_motion=True,
+            )
+
+        # 与 legacy 一致：终调期间也要复检剩余路径。地图更新或目标
+        # 位姿变化导致连接段失效时，停住并在下一帧重新规划，不能继续
+        # 沿已经被障碍占据的旧路径输出运动指令。
+        path_check = ctx.runtime.validate_remaining_path(
+            ctx.path,
+            ctx.path_idx,
+            (cur_pose[0], cur_pose[1]),
+            snapshot.obstacle_snapshot,
+        )
+        if not path_check.safe:
+            if now - self.last_replan_t >= 1.0:
+                self.last_replan_t = now
+                ctx.clear_active_path()
+                return StateDecision(
+                    command_desc=f"final_adjust: path blocked ({path_check.reason}) -> replan",
+                    reset_motion=True,
+                )
+            return StateDecision(
+                command_desc="final_adjust: path blocked, replan cooldown",
+                reset_motion=True,
+            )
 
         # 4. 纯追踪低速逼近
         sm_yaw = ctx.yaw_smoother.update(cur_pose[2])
@@ -134,6 +186,25 @@ class FinalAdjustState(BaseNavState):
         cmd = (cmd[0], ctx.out_smoother.update(cmd[1], deadband=deadband))
         ctx.path_idx = next_idx
         ctx.lookahead_target = lookahead
+
+        # legacy 在跟随计算后也再次检查锁定条件。这样当本帧刚好走到
+        # GOAL_NAV，或 follow_path_step 推进到路径末端时，可以立即切入
+        # FINAL_FOLLOW，而不必依赖下一帧的偶然路径状态。
+        elapsed = now - self.enter_t
+        if (
+            elapsed >= FINAL_ADJUST_FORCE_TIME
+            or (
+                elapsed >= FINAL_ADJUST_TIME
+                and self.valid_frames >= FINAL_ADJUST_MIN_FRAMES
+                and d_nav <= FINAL_ADJUST_LOCK_DIST
+            )
+        ):
+            ctx.final_from_reloc = False
+            return StateDecision(
+                next_state=FinalFollowState,
+                command_desc=f"final_adjust locked ({self.valid_frames} frames / {elapsed:.1f}s) -> follow",
+                reset_motion=True,
+            )
 
         ctx.log_action("ADJUST", "MotionThread", f"adjusting target={target} frames={self.valid_frames}")
         return StateDecision(

@@ -44,7 +44,10 @@ class RelocState(BaseNavState):
     def on_update(self, ctx: "NavContext", snapshot: FrameSnapshot) -> StateDecision:
         from fsm.states.final_adjust import FinalAdjustState
         from fsm.states.final_follow import FinalFollowState
+        from fsm.states.final_plan import FinalPlanState
         from fsm.states.patrol_plan import PatrolPlanState
+        from fsm.states.patrol_follow import PatrolFollowState
+        from fsm.states.scanning import ScanningState
         from fsm.states.waiting import WaitingState
         from fsm.states.inquiry import InquiryState
 
@@ -57,39 +60,65 @@ class RelocState(BaseNavState):
             prev_cls = ctx.reloc_prev_state_cls
             ctx.boot_scan_done = True
 
-            if prev_cls is not None and prev_cls.__name__.startswith("Final"):
+            if prev_cls in (FinalPlanState, FinalFollowState, FinalAdjustState):
                 ctx.clear_active_path()
+                print("[RELOC] 恢复 TRACKING: 保留 final 目标, 直接 FINAL_FOLLOW 续走 (不重扫描)")
                 return StateDecision(
                     next_state=FinalFollowState,
                     command_desc="RELOC recovered -> resume FinalFollow",
                     reset_motion=True,
                 )
-            elif prev_cls is not None and prev_cls.__name__.startswith("Patrol"):
+            if prev_cls in (PatrolPlanState, PatrolFollowState):
                 ctx.clear_active_path()
+                print("[RELOC] 恢复 TRACKING: 保留 patrol 目标, 直接 PATROL_PLAN 续走 (不重扫描)")
                 return StateDecision(
                     next_state=PatrolPlanState,
                     command_desc="RELOC recovered -> resume PatrolPlan",
                     reset_motion=True,
                 )
-            else:
-                target_cls = prev_cls if prev_cls is not None else WaitingState
+            if prev_cls is ScanningState:
+                # 扫描中被 reloc: 不继续转完, 按已有目标直接续
+                if ctx.final_target is not None:
+                    ctx.clear_active_path()
+                    target_cls = FinalPlanState
+                elif ctx.patrol_target is not None:
+                    ctx.clear_active_path()
+                    target_cls = PatrolPlanState
+                else:
+                    ctx.auto_vlm_asked = False
+                    ctx.vlm_reask_pending = False
+                    target_cls = InquiryState
+                print("[RELOC] 恢复 TRACKING: 扫描中 reloc, 跳过扫描续走")
                 return StateDecision(
                     next_state=target_cls,
-                    command_desc=f"RELOC recovered -> {target_cls.name}",
+                    command_desc=f"RELOC recovered (from SCANNING) -> {target_cls.name}",
                     reset_motion=True,
                 )
+            target_cls = prev_cls if prev_cls is not None else WaitingState
+            print(f"[RELOC] 恢复 TRACKING: 续回 {target_cls.name} (不重扫描)")
+            return StateDecision(
+                next_state=target_cls,
+                command_desc=f"RELOC recovered -> {target_cls.name}",
+                reset_motion=True,
+            )
 
         if snapshot.halted:
             return StateDecision(command_desc="ESTOP (halt)", reset_motion=True)
 
         elapsed = now - self.start_t
 
-        # 超过最大重定位时间放弃自动接管
+        # 超过最大重定位时间放弃自动接管：释放回进入 RELOC 前的状态，
+        # 由主循环在 SLAM 离开 RELOC 后做站位/路径清理与 PLAN 回切。
         if elapsed > self.RELOC_MAX_TIME:
             ctx.reloc_giveup = True
+            target_cls = ctx.reloc_prev_state_cls if ctx.reloc_prev_state_cls is not None else WaitingState
+            print(
+                f"[RELOC] 警告: 持续 {elapsed:.0f}s 未恢复, "
+                f"放弃自动 RELOC 接管, 释放回 {target_cls.name}"
+            )
             return StateDecision(
-                next_state=WaitingState,
-                command_desc=f"RELOC timeout ({elapsed:.0f}s) -> waiting",
+                next_state=target_cls,
+                command_desc=f"RELOC timeout ({elapsed:.0f}s) -> {target_cls.name}",
                 reset_motion=True,
             )
 
@@ -158,6 +187,7 @@ class RelocState(BaseNavState):
                                 ctx.final_target = (t3d[0], t3d[2])
                                 ctx.final_goal_nav = None
                                 ctx.final_from_reloc = True
+                                ctx.reloc_giveup = True
                                 ctx.goal_source = "vlm_det"
                                 ctx.vlm_latest = (vlm_res.dets, vlm_res.masks)
                                 ctx.final_bbox_anchor = {
@@ -215,3 +245,4 @@ class RelocState(BaseNavState):
 
     def on_exit(self, ctx: "NavContext", snapshot: FrameSnapshot) -> None:
         ctx.services.motion_thread.stop()
+        ctx.clear_escape()
