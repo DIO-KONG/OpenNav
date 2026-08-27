@@ -188,6 +188,7 @@ class RelocState(BaseNavState):
                                 ctx.invalidate_vlm("reloc_target_locked")
                                 ctx.final_target = (t3d[0], t3d[2])
                                 ctx.final_goal_nav = None
+                                ctx.note_new_final_target()
                                 ctx.final_from_reloc = True
                                 ctx.reloc_giveup = True
                                 ctx.goal_source = "vlm_det"

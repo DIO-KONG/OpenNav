@@ -105,6 +105,11 @@ class NavContext:
         self.reloc_prev_state_cls: Optional[Type[BaseNavState]] = None
         self.final_from_reloc: bool = False
 
+        # PLAN 失败计数跨 FOLLOW/PLAN 保留；仅新目标或成功规划时清零。
+        self.patrol_plan_fail_cnt: int = 0
+        self.final_plan_fail_cnt: int = 0
+        self.final_plan_retry_t: float = 0.0
+
     def invalidate_vlm(self, reason: str = ""):
         """使所有未完成的异步 VLM HTTP 任务失效。"""
         self.vlm_epoch += 1
@@ -136,6 +141,24 @@ class NavContext:
         self.escape_target = None
         self.escape_semantic_target = None
         self.escape_replan_from_semantic = False
+
+    def set_patrol_goal(self, target: tuple, source: str = "frontier") -> None:
+        """设置新巡逻目标：失效旧 VLM、清站位/路径/脱困上下文，并重置失败计数。"""
+        self.invalidate_vlm("new_patrol_goal")
+        self.clear_escape()
+        self.auto_vlm_asked = False
+        self.vlm_reask_pending = False
+        self.patrol_target = target
+        self.patrol_source = source
+        self.goal_source = source
+        self.patrol_plan_fail_cnt = 0
+        self.clear_patrol(clear_target=False)
+        self.clear_active_path()
+
+    def note_new_final_target(self) -> None:
+        """接受新最终目标时清零 FINAL_PLAN 失败计数与冷却。"""
+        self.final_plan_fail_cnt = 0
+        self.final_plan_retry_t = 0.0
 
     def reset_smoothers(self):
         """重置航向与速度输出平滑器。"""

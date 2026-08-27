@@ -14,11 +14,9 @@ class PatrolPlanState(BaseNavState):
     PLAN_FAIL_MAX: int = 10
 
     def __init__(self):
-        self.plan_fail_cnt: int = 0
         self.frontier_retry_t: float = 0.0
 
     def on_enter(self, ctx: "NavContext", snapshot: FrameSnapshot) -> None:
-        self.plan_fail_cnt = 0
         ctx.services.motion_thread.stop()
 
     def on_update(self, ctx: "NavContext", snapshot: FrameSnapshot) -> StateDecision:
@@ -68,35 +66,30 @@ class PatrolPlanState(BaseNavState):
         if path is not None and len(path) > 0:
             ctx.path = path
             ctx.path_idx = 0
-            self.plan_fail_cnt = 0
+            ctx.patrol_plan_fail_cnt = 0
             return StateDecision(
                 next_state=PatrolFollowState,
                 command_desc=f"patrol_plan: path ready (len={len(path)})",
                 reset_motion=True,
             )
 
-        # 规划失败处理
-        self.plan_fail_cnt += 1
-        if self.plan_fail_cnt >= self.PLAN_FAIL_MAX:
+        # 规划失败处理（计数跨 FOLLOW->PLAN 保留）
+        ctx.patrol_plan_fail_cnt += 1
+        if ctx.patrol_plan_fail_cnt >= self.PLAN_FAIL_MAX:
             ft, _ = auto_trigger_patrol(
                 ctx.services.slam, cur_pose, snapshot.nav_y, snapshot.obs_current
             )
             if ft is not None:
-                ctx.patrol_target = ft
-                ctx.patrol_source = "frontier"
-                ctx.goal_source = "frontier"
-                ctx.clear_active_path()
-                ctx.clear_patrol(clear_target=False)
-                self.plan_fail_cnt = 0
+                ctx.set_patrol_goal(ft, "frontier")
                 return StateDecision(
                     command_desc=f"patrol_plan: RRT failed -> fallback frontier {ft}"
                 )
             elif time.time() - self.frontier_retry_t >= 2.0:
                 self.frontier_retry_t = time.time()
-                print(f"[nav_2d][WARN] PATROL 规划不成功 (连续 {self.plan_fail_cnt} 次失败) 且无 frontier，等待地图更新")
+                print(f"[nav_2d][WARN] PATROL 规划不成功 (连续 {ctx.patrol_plan_fail_cnt} 次失败) 且无 frontier，等待地图更新")
 
         return StateDecision(
-            command_desc=f"patrol_plan: plan failed ({self.plan_fail_cnt})",
+            command_desc=f"patrol_plan: plan failed ({ctx.patrol_plan_fail_cnt})",
             reset_motion=True,
         )
 

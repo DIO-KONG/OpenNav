@@ -39,11 +39,7 @@ class FrontierNavPolicy(BaseNavigationPolicy):
                 ctx.services.slam, cur_pose, snapshot.nav_y, snapshot.obs_current
             )
             if ft is not None:
-                ctx.patrol_target = ft
-                ctx.patrol_source = "frontier"
-                ctx.goal_source = "frontier"
-                ctx.clear_active_path()
-                ctx.clear_patrol(clear_target=False)
+                ctx.set_patrol_goal(ft, "frontier")
                 return StateDecision(
                     next_state=PatrolPlanState,
                     command_desc=f"frontier: selected {ft}",

@@ -12,12 +12,7 @@ class FinalPlanState(BaseNavState):
     PLAN_FAIL_MAX: int = 10
     PLAN_RETRY_COOLDOWN: float = 2.0
 
-    def __init__(self):
-        self.plan_fail_cnt: int = 0
-        self.retry_t: float = 0.0
-
     def on_enter(self, ctx: "NavContext", snapshot: FrameSnapshot) -> None:
-        self.plan_fail_cnt = 0
         ctx.services.motion_thread.stop()
 
     def on_update(self, ctx: "NavContext", snapshot: FrameSnapshot) -> StateDecision:
@@ -30,7 +25,7 @@ class FinalPlanState(BaseNavState):
         if cur_pose is None or target is None:
             return StateDecision(command_desc="final_plan: waiting pose/target", reset_motion=True)
 
-        if now < self.retry_t:
+        if now < ctx.final_plan_retry_t:
             return StateDecision(command_desc="final plan retry cooldown", reset_motion=True)
 
         plan_start_2d = (
@@ -68,18 +63,18 @@ class FinalPlanState(BaseNavState):
         if path is not None and len(path) > 0:
             ctx.path = path
             ctx.path_idx = 0
-            self.plan_fail_cnt = 0
-            self.retry_t = 0.0
+            ctx.final_plan_fail_cnt = 0
+            ctx.final_plan_retry_t = 0.0
             return StateDecision(
                 next_state=FinalFollowState,
                 command_desc=f"final_plan: path ready (len={len(path)})",
                 reset_motion=True,
             )
 
-        self.plan_fail_cnt += 1
-        self.retry_t = now + self.PLAN_RETRY_COOLDOWN
-        if self.plan_fail_cnt >= self.PLAN_FAIL_MAX:
-            self.plan_fail_cnt = 0
+        ctx.final_plan_fail_cnt += 1
+        ctx.final_plan_retry_t = now + self.PLAN_RETRY_COOLDOWN
+        if ctx.final_plan_fail_cnt >= self.PLAN_FAIL_MAX:
+            ctx.final_plan_fail_cnt = 0
             ctx.clear_final(clear_target=False)
             ctx.clear_active_path()
             print(
@@ -92,7 +87,7 @@ class FinalPlanState(BaseNavState):
             )
 
         return StateDecision(
-            command_desc=f"final_plan: plan failed ({self.plan_fail_cnt})", reset_motion=True
+            command_desc=f"final_plan: plan failed ({ctx.final_plan_fail_cnt})", reset_motion=True
         )
 
     def on_exit(self, ctx: "NavContext", snapshot: FrameSnapshot) -> None:

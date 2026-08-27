@@ -141,6 +141,7 @@ def handle_global_auto_detection(
                             if ctx.final_from_reloc or ctx.final_target is None:
                                 ctx.final_target = (t3d[0], t3d[2])
                                 ctx.final_goal_nav = None
+                                ctx.note_new_final_target()
                                 fsm.current_state.valid_frames += 1
                                 ctx.clear_active_path()
                             else:
@@ -155,6 +156,7 @@ def handle_global_auto_detection(
                                         + (1.0 - FINAL_ADJUST_SMOOTH_ALPHA) * ctx.final_target[1],
                                     )
                                     ctx.final_goal_nav = None
+                                    ctx.note_new_final_target()
                                     fsm.current_state.valid_frames += 1
                                     ctx.clear_active_path()
                                 else:
@@ -165,6 +167,7 @@ def handle_global_auto_detection(
                         elif ctx.policy.should_accept_final_adjust(ctx, snapshot, t3d):
                             ctx.final_target = (t3d[0], t3d[2])
                             ctx.final_goal_nav = None
+                            ctx.note_new_final_target()
                             ctx.goal_source = "vlm_det"
                             ctx.vlm_latest = (vlm_res.dets, vlm_res.masks)
                             ctx.final_bbox_anchor = {

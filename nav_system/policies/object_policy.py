@@ -63,13 +63,7 @@ class ObjectNavPolicy(BaseNavigationPolicy):
                         ctx.services.slam, cur_pose, nav_y, snapshot.obs_current
                     )
                     if ft is not None:
-                        ctx.patrol_target = ft
-                        ctx.patrol_source = "frontier"
-                        ctx.goal_source = "frontier"
-                        ctx.clear_active_path()
-                        ctx.clear_patrol(clear_target=False)
-                        ctx.auto_vlm_asked = False
-                        ctx.vlm_reask_pending = False
+                        ctx.set_patrol_goal(ft, "frontier")
                         return StateDecision(
                             next_state=PatrolPlanState,
                             command_desc=f"inquiry: vlm=F -> frontier {ft}",
@@ -134,13 +128,7 @@ class ObjectNavPolicy(BaseNavigationPolicy):
                                 ctx.services.slam, cur_pose, nav_y, snapshot.obs_current
                             )
                             if ft is not None:
-                                ctx.patrol_target = ft
-                                ctx.patrol_source = "frontier"
-                                ctx.goal_source = "frontier"
-                                ctx.clear_active_path()
-                                ctx.clear_patrol(clear_target=False)
-                                ctx.vlm_reask_pending = False
-                                ctx.auto_vlm_asked = False
+                                ctx.set_patrol_goal(ft, "frontier")
                                 return StateDecision(
                                     next_state=PatrolPlanState,
                                     command_desc="inquiry: reask reached -> frontier",
@@ -152,13 +140,7 @@ class ObjectNavPolicy(BaseNavigationPolicy):
                                 command_desc="inquiry: dir reached -> re-ask vlm"
                             )
                     else:
-                        ctx.invalidate_vlm("vlm_direction_goal")
-                        ctx.patrol_target = (tx, tz)
-                        ctx.patrol_source = "vlm_dir"
-                        ctx.goal_source = "vlm_dir"
-                        ctx.clear_active_path()
-                        ctx.clear_patrol(clear_target=False)
-                        ctx.vlm_reask_pending = False
+                        ctx.set_patrol_goal((tx, tz), "vlm_dir")
                         return StateDecision(
                             next_state=PatrolPlanState,
                             command_desc=f"inquiry: target=({tx:.2f},{tz:.2f})",

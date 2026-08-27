@@ -86,33 +86,33 @@
 - **legacy 正确逻辑**：关键字 `_reset_intrusion_escape(clear_path0=False)`、`_escaping = False`、`state = _resume_state`。
 - **重构错误位置**：`nav_system/fsm/states/escape.py` 关键字 `path0 reached -> resume path`、`path1 aligned -> resume follow`；当前直接返回 `next_state`，未清理 `ctx.resume_state_cls` 等字段。
 
-### P2
+### P2（已完成）
 
-#### 13. 新 patrol 目标时失效旧 VLM 结果
+#### 13. 新 patrol 目标时失效旧 VLM 结果 ✅
 
 - **修复指导**：所有设置新 patrol 目标的入口统一执行 `ctx.invalidate_vlm("new_patrol_goal")`，并清理旧路径、站位和预转向状态，避免旧 auto_detect 结果在新巡逻周期中被应用。
 - **legacy 正确逻辑**：关键字 `_set_patrol_goal()`、`_invalidate_vlm("new_patrol_goal")`。
 - **重构错误位置**：`nav_system/policies/object_policy.py`、`nav_system/policies/frontier_policy.py`、`nav_system/fsm/states/patrol_plan.py` 设置 `patrol_target` 的分支；当前多数入口只调用 `clear_active_path()`。
 
-#### 14. PATROL_PLAN 失败计数跨状态保留
+#### 14. PATROL_PLAN 失败计数跨状态保留 ✅
 
 - **修复指导**：不要在每次进入 `PatrolPlanState` 时无条件清零失败计数；只有新目标或成功规划时清零，保证 FOLLOW -> PLAN 后连续失败达到阈值时能切换 frontier。
 - **legacy 正确逻辑**：关键字 `_patrol_plan_fail_cnt`；计数在 `PATROL_PLAN` 失败分支累加，在新目标/成功规划时清零。
 - **重构错误位置**：`nav_system/fsm/states/patrol_plan.py` `on_enter()` 关键字 `self.plan_fail_cnt = 0`。
 
-#### 15. FINAL_PLAN 失败计数跨 FOLLOW/PLAN 保留
+#### 15. FINAL_PLAN 失败计数跨 FOLLOW/PLAN 保留 ✅
 
 - **修复指导**：与 legacy 一样，FINAL_FOLLOW 因路径失效转 FINAL_PLAN 时不要无条件丢失累计失败次数；仅成功规划、新目标或明确重新开始最终任务时清零。
 - **legacy 正确逻辑**：关键字 `_final_plan_fail_cnt`、`final_rrt_failed`、`_final_plan_retry_t`。
 - **重构错误位置**：`nav_system/fsm/states/final_plan.py` `on_enter()` 关键字 `self.plan_fail_cnt = 0`。
 
-#### 16. FINAL_ADJUST 规划/跟随首帧时序对齐
+#### 16. FINAL_ADJUST 规划/跟随首帧时序对齐 ✅
 
 - **修复指导**：对照 legacy 决定路径为空时本帧只规划、下一帧再跟随；同时避免 `on_exit()`、`reset_motion=True` 造成 FINAL_ADJUST -> FINAL_FOLLOW 的额外停车。保留跳过 path[0] 的修复，但不要改变后续状态时序。
 - **legacy 正确逻辑**：`legacy/*` 关键字 `elif path is None`、`_final_plan_goal`、`_lock_final_adjust_if_ready`；路径重建后不会在同一分支继续执行跟随。
 - **重构错误位置**：`nav_system/fsm/states/final_adjust.py` 关键字 `path is None or len(path) == 0`、`follow_path_step`、`on_exit`；当前规划成功后同帧继续跟随，并在状态切换时停车。
 
-#### 17. FINAL_ADJUST 锁定判断统一到 legacy 时机
+#### 17. FINAL_ADJUST 锁定判断统一到 legacy 时机 ✅
 
 - **修复指导**：将锁定判断整理为与 legacy 一致的单一流程：到达 GOAL_NAV 后先停车再判断；未到达时先跟随再判断；FORCE_TIMEOUT 也遵循同一时序。避免函数开头提前锁定导致漏掉本帧控制或改变状态转换时机。
 - **legacy 正确逻辑**：`legacy/*` 关键字 `_lock_final_adjust_if_ready`、`if d_tgt <= PATROL_ARRIVE_EPS or _de <= PATROL_ARRIVE_EPS`、跟随后的 `_lock_final_adjust_if_ready(d_tgt)`。
