@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Type, Optional
+from dataclasses import replace
 from fsm.base_state import BaseNavState
 from fsm.decision import FrameSnapshot, StateDecision
 from fsm.context import NavContext
@@ -47,7 +48,21 @@ class NavigationStateMachine:
     def step(self, snapshot: FrameSnapshot) -> StateDecision:
         """单步执行当前活跃状态的逻辑，并根据返回值处理转移。"""
         self.step_count += 1
-        decision = self.current_state.on_update(self.context, snapshot)
+        source_state = self.current_state
+        decision = source_state.on_update(self.context, snapshot)
+
+        # on_update 可能已经修改 path/path_idx，随后 change_state 的
+        # on_exit/on_enter 还可能清理它们。先保存本帧命令对应的调试数据，
+        # 供主循环与 overlay 使用，避免显示新状态却对应旧状态命令。
+        decision = replace(
+            decision,
+            source_state_name=source_state.name,
+            debug_path=(list(self.context.path) if self.context.path is not None else None),
+            debug_path_idx=(
+                int(self.context.path_idx) if self.context.path is not None else None
+            ),
+            debug_lookahead=self.context.lookahead_target,
+        )
 
         # 若状态请求了跳转，则立刻执行生命周期转移
         if decision.next_state is not None:

@@ -212,6 +212,9 @@ def handle_global_auto_detection(
                                 fsm.change_state(FinalAdjustState, snapshot)
 
     # 2. 周期提交检测任务
+    # 结果消费阶段可能已经把 FSM 切入 FINAL_ADJUST；重新读取状态，
+    # 避免继续沿用进入本函数时的旧参数（检测周期、presence 门控等）。
+    in_adjust = isinstance(fsm.current_state, FinalAdjustState)
     det_period = FINAL_ADJUST_DET_PERIOD if in_adjust else OBJ_DET_PERIOD
     should_det = (ctx.final_target is None and not in_adjust) or in_adjust
     can_submit = not (in_reloc or in_done or in_escape) and (
@@ -389,9 +392,10 @@ def main():
 
             # ---- 6. 渲染 Web 调试视图 (Overlay 与 Top-Down 栅格地图) ----
             if DEBUG_FEATURES.get("web_ui", True):
+                overlay_state = decision.source_state_name or fsm.current_state.name
                 if img is not None:
                     overlay_lines = [
-                        (f"[{fsm.current_state.name}] {decision.command_desc}", (0, 255, 0)),
+                        (f"[{overlay_state}] {decision.command_desc}", (0, 255, 0)),
                         (f"nav[{nav_source}] x={cur_pose[0]:.2f} z={cur_pose[1]:.2f} yaw={np.degrees(cur_pose[2]):.0f}°", (0, 255, 255)) if cur_pose else ("pose lost", (0, 0, 255)),
                         f"fps={fps:.1f}  n_kf={services.slam.num_keyframes()}",
                     ]
@@ -451,12 +455,24 @@ def main():
                     "patrol_nav": context.patrol_goal_nav,
                     "final_target": context.final_target,
                     "final_nav": context.final_goal_nav,
-                    "lookahead": context.lookahead_target,
-                    "path": context.path,
-                    "path_idx": context.path_idx,
+                    "lookahead": (
+                        decision.debug_lookahead
+                        if decision.debug_lookahead is not None
+                        else context.lookahead_target
+                    ),
+                    "path": (
+                        decision.debug_path
+                        if decision.debug_path is not None
+                        else context.path
+                    ),
+                    "path_idx": (
+                        decision.debug_path_idx
+                        if decision.debug_path_idx is not None
+                        else context.path_idx
+                    ),
                     "d_tgt": context.d_tgt,
                     "d_robot": context.d_robot,
-                    "state": fsm.current_state.name,
+                    "state": overlay_state,
                     "nav_y": nav_y,
                     "n_map_points": n_map,
                     "goal_source": context.goal_source,

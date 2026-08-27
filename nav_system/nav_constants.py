@@ -19,6 +19,9 @@
 ROBOT_RADIUS = 0.35                       # 机器人本体半径 (m)
 RRT_OBSTACLE_INFLATE = ROBOT_RADIUS + 0.05  # RRT 规划障碍物膨胀半径 (≈0.40m)
 NAV_CLEARANCE = RRT_OBSTACLE_INFLATE      # 全局唯一安全净空：导航点/连接段/剩余路径合法性检验基准
+# legacy 公共参数名保留为兼容别名；路径规划内部统一使用 NAV_CLEARANCE。
+SUBOPT_GOAL_EPS = ROBOT_RADIUS * 0.8
+REPLAN_PERIOD = 1.0
 
 
 # ============================================================
@@ -74,6 +77,7 @@ PRETURN_RETREAT_TIMEOUT = 4.0             # 预转向最大动作超时时间 (s
 ESCAPE_PATH0_REVERSE_MIN_ANGLE_DEG = 90.0 # 目标位于后半球时倒车脱困切入角 (°)
 ESCAPE_PATH0_ALIGN_EPS_DEG = 5.0          # 脱困直线原地对准容差角 (°)
 ESCAPE_PATH0_ALIGN_ANG_MAX = 0.12         # 脱困对准最大自旋角速度 (rad/s)
+ESCAPE_PATH0_REVERSE_ANG_MAX = ESCAPE_PATH0_ALIGN_ANG_MAX  # legacy 兼容别名
 ESCAPE_PATH0_REVERSE_SPEED = 0.05         # 脱困倒车巡航速度 (m/s)
 ESCAPE_PATH0_REVERSE_MIN_SPEED = 0.03     # 脱困倒车最小速度 (m/s)
 ESCAPE_PATH0_ARRIVE_EPS = 0.08            # 脱困第一航路点到达判定容差 (m)
@@ -90,7 +94,9 @@ POST_ESCAPE_CONVERGE_YAW = 0.10           # SLAM 航向与 Odom 追平角度阈�
 OBJ_DET_PERIOD = 2.0                      # 巡逻期间目标检测周期 (s)
 AUTO_VLM_RETRY_PERIOD = 3.0               # VLM 方向问询失败时的重试间隔 (s)
 VLM_URL_DEFAULT = "http://localhost:8222/v1"
-VLM_DETECT_TARGET_DEFAULT = "white plastic stool" # 默认视觉目标检测对象
+VLM_DETECT_TARGET_DEFAULT = "white plastic stool"           # 默认视觉目标检测对象
+VLM_MODEL_DEFAULT = ""
+VLM_PAIRS_DIR = "vlm_pairs"
 
 # 终调视觉伺服 (Final Adjust)
 FINAL_ADJUST_TIME = 20.0                  # 终调最小持续观察时间 (s)
@@ -120,6 +126,7 @@ VLM_DETECTION_PROMPT = f"""Detect {VLM_DETECT_TARGET_DEFAULT} and identify their
 
 VLM_PRESENCE_PROMPT = f"""Look at the current camera image. Is there {VLM_DETECT_TARGET_DEFAULT} present in the scene?
 Answer with only the single word 'yes' or 'no', no explanation."""
+VLM_H_PROMPT = f"In order to find {VLM_DETECT_TARGET_DEFAULT} , in current observation, which direction of the area is most likely to go? You have to select a choice from left, right, front,  and explain"
 
 MOBILE_SAM_CHECKPOINT_PATH = '/home/agilex/yinzecheng/opennav/mobile_sam/mobile_sam.pt'
 

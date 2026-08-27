@@ -38,3 +38,9 @@ class StateDecision:
     angular: float = 0.0                              # 期望角速度 (rad/s)
     command_desc: str = "idle"                        # 终端与 HUD 显示动作描述
     reset_motion: bool = False                        # 是否立即停止底盘运动
+    # 调试快照：由 FSM 引擎在状态更新完成、生命周期切换之前填充。
+    # 运动命令、状态名和 overlay 因此始终对应同一帧。
+    source_state_name: Optional[str] = None
+    debug_path: Optional[list] = None
+    debug_path_idx: Optional[int] = None
+    debug_lookahead: Optional[tuple] = None
