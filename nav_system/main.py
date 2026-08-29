@@ -36,6 +36,7 @@ from nav_helpers import (
     _presence_is_yes,
     extract_target_3d_from_snapshot,
     _get_accumulated_map,
+    project_locked_target_bbox,
 )
 from nav_vlm import qwen_bbox_to_pixel
 from nav_page import draw_debug_overlay, draw_map_view
@@ -164,10 +165,13 @@ def handle_global_auto_detection(
                         map_points=map_fallback,
                     )
                     if t3d is not None:
-                        # 正在终调中：执行 EMA 平滑滤波
+                        target_accepted = False
+                        locked_t3d = tuple(float(v) for v in t3d[:3])
+                        # 正在终调中：执行 EMA 平滑滤波，并刷新锁定 bbox 锚点
                         if in_adjust:
                             if ctx.final_from_reloc or ctx.final_target is None:
                                 ctx.final_target = (t3d[0], t3d[2])
+                                target_accepted = True
                                 ctx.final_goal_nav = None
                                 ctx.note_new_final_target()
                                 fsm.current_state.valid_frames += 1
@@ -183,12 +187,30 @@ def handle_global_auto_detection(
                                         FINAL_ADJUST_SMOOTH_ALPHA * t3d[2]
                                         + (1.0 - FINAL_ADJUST_SMOOTH_ALPHA) * ctx.final_target[1],
                                     )
+                                    if ctx.final_bbox_anchor is not None:
+                                        old_t3d = ctx.final_bbox_anchor["target_world"]
+                                        locked_t3d = tuple(
+                                            FINAL_ADJUST_SMOOTH_ALPHA * float(t3d[i])
+                                            + (1.0 - FINAL_ADJUST_SMOOTH_ALPHA) * float(old_t3d[i])
+                                            for i in range(3)
+                                        )
+                                    target_accepted = True
                                     ctx.final_goal_nav = None
                                     ctx.note_new_final_target()
                                     fsm.current_state.valid_frames += 1
                                     ctx.clear_active_path()
                                 else:
                                     print(f"[nav_auto][DET] EMA 拒收离群测量 (跳变 {jump:.2f}m > {FINAL_ADJUST_REJECT_DIST:.2f}m)")
+                            if target_accepted:
+                                ctx.vlm_latest = (vlm_res.dets, vlm_res.masks)
+                                if res_ctx.get("camera_pose_3d") is not None:
+                                    ctx.final_bbox_anchor = {
+                                        "target_world": locked_t3d,
+                                        "bbox_px": (x1, y1, x2, y2),
+                                        "image_shape": tuple(res_ctx["image_shape"]),
+                                        "camera_pose": tuple(res_ctx["camera_pose_3d"]),
+                                        "detection": dict(vlm_res.dets[0]),
+                                    }
 
                         # 巡逻或探索中检测到目标：经由 Policy 门控裁决是否接受目标。
                         # 仅 SCANNING / VLM_INQUIRY / PATROL_* 才切入 FINAL_ADJUST。
@@ -399,6 +421,27 @@ def main():
                         (f"nav[{nav_source}] x={cur_pose[0]:.2f} z={cur_pose[1]:.2f} yaw={np.degrees(cur_pose[2]):.0f}°", (0, 255, 255)) if cur_pose else ("pose lost", (0, 0, 255)),
                         f"fps={fps:.1f}  n_kf={services.slam.num_keyframes()}",
                     ]
+                    overlay_vlm = context.vlm_latest
+                    if (
+                        overlay_state == "FINAL_FOLLOW"
+                        and context.final_bbox_anchor is not None
+                        and services.bbox_calibration is not None
+                    ):
+                        projected_bbox = project_locked_target_bbox(
+                            context.final_bbox_anchor["target_world"],
+                            services.slam.get_pose_full(),
+                            img.shape[:2],
+                            services.bbox_calibration,
+                            context.final_bbox_anchor["bbox_px"],
+                            context.final_bbox_anchor["image_shape"],
+                            context.final_bbox_anchor["camera_pose"],
+                        )
+                        if projected_bbox is not None:
+                            projected_det = dict(context.final_bbox_anchor["detection"])
+                            projected_det["bbox_2d"] = projected_bbox
+                            overlay_vlm = ([projected_det], None)
+                        else:
+                            overlay_vlm = (None, None)
                     overlay_frame = draw_debug_overlay(
                         img,
                         {
@@ -406,8 +449,8 @@ def main():
                             "rects": [],
                             "robot_pose": cur_pose,
                             "using_odom": use_odom,
-                            "vlm_dets": context.vlm_latest[0],
-                            "vlm_masks": context.vlm_latest[1],
+                            "vlm_dets": overlay_vlm[0],
+                            "vlm_masks": overlay_vlm[1],
                         },
                     )
                     mock.set_frame(overlay_frame)
