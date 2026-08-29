@@ -58,6 +58,10 @@ class NavContext:
         self.escape_target: Optional[tuple] = None
         self.escape_semantic_target: Optional[tuple] = None
         self.escape_replan_from_semantic: bool = False
+        # ESCAPE 恢复 FOLLOW/ADJUST 时置位：on_enter 不得清 path / 武装 preturn。
+        self.resume_from_escape: bool = False
+        # FOLLOW 因剩余路径净空失败切 PLAN：规划期间保持上一拍 cmd_vel，PLAN/FOLLOW 进出不停电机。
+        self.coast_replan: bool = False
 
         # ---- 位姿平滑与 Odom 推算持久状态 ----
         self.anchor_kf: Optional[tuple] = None
@@ -159,6 +163,8 @@ class NavContext:
         self.escape_target = None
         self.escape_semantic_target = None
         self.escape_replan_from_semantic = False
+        self.resume_from_escape = False
+        self.coast_replan = False
 
     def set_patrol_goal(self, target: tuple, source: str = "frontier") -> None:
         """设置新巡逻目标：失效旧 VLM、清站位/路径/脱困上下文，并重置失败计数。"""

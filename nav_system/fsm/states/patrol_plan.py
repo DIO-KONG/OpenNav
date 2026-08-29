@@ -17,7 +17,8 @@ class PatrolPlanState(BaseNavState):
         self.frontier_retry_t: float = 0.0
 
     def on_enter(self, ctx: "NavContext", snapshot: FrameSnapshot) -> None:
-        ctx.services.motion_thread.stop()
+        if not ctx.coast_replan:
+            ctx.services.motion_thread.stop()
 
     def on_update(self, ctx: "NavContext", snapshot: FrameSnapshot) -> StateDecision:
         from fsm.states.patrol_follow import PatrolFollowState
@@ -67,10 +68,12 @@ class PatrolPlanState(BaseNavState):
             ctx.path = path
             ctx.path_idx = 0
             ctx.patrol_plan_fail_cnt = 0
+            coasting = ctx.coast_replan
+            ctx.coast_replan = False
             return StateDecision(
                 next_state=PatrolFollowState,
                 command_desc=f"patrol_plan: path ready (len={len(path)})",
-                reset_motion=True,
+                reset_motion=not coasting,
             )
 
         # 规划失败处理（计数跨 FOLLOW->PLAN 保留）
@@ -88,6 +91,7 @@ class PatrolPlanState(BaseNavState):
                 self.frontier_retry_t = time.time()
                 print(f"[nav_2d][WARN] PATROL 规划不成功 (连续 {ctx.patrol_plan_fail_cnt} 次失败) 且无 frontier，等待地图更新")
 
+        ctx.coast_replan = False
         return StateDecision(
             command_desc=f"patrol_plan: plan failed ({ctx.patrol_plan_fail_cnt})",
             reset_motion=True,

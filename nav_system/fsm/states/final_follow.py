@@ -89,6 +89,10 @@ class FinalFollowState(BaseNavState):
         self.preturn_last_tick = snapshot.now
         ctx.reset_smoothers()
 
+        if ctx.resume_from_escape:
+            ctx.resume_from_escape = False
+            return
+
         self._maybe_arm_preturn(ctx, snapshot)
 
     def on_update(self, ctx: "NavContext", snapshot: FrameSnapshot) -> StateDecision:
@@ -216,9 +220,7 @@ class FinalFollowState(BaseNavState):
                 ctx.final_adj_plan_fail_cnt = 0
                 ctx.reset_smoothers()
                 self._maybe_arm_preturn(ctx, snapshot)
-                return StateDecision(
-                    command_desc="plan pending (final follow)", reset_motion=True
-                )
+                return StateDecision(command_desc="plan pending (final follow)")
 
             ctx.final_adj_plan_fail_cnt += 1
             if ctx.final_adj_plan_fail_cnt >= PLAN_FAIL_MAX:

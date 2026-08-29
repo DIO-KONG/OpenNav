@@ -41,8 +41,9 @@ vlm_pairs/
 debug*
 *debug/
 *output/
-episodes/ep*
+episodes
 wenhao/
+done
 
 # ==========================================
 # 📦 模型权重与数据集 (Model Weights & Datasets)

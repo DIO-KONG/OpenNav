@@ -44,6 +44,11 @@ class PatrolFollowState(BaseNavState):
         self.preturn_last_tick = snapshot.now
         ctx.reset_smoothers()
 
+        if ctx.resume_from_escape:
+            # 脱困后已对准 path[1]，不得再 arm preturn 把车倒回障碍。
+            ctx.resume_from_escape = False
+            return
+
         # 尝试激活近墙大角度预转向
         cur_pose = snapshot.cur_pose
         path = ctx.path
@@ -160,7 +165,8 @@ class PatrolFollowState(BaseNavState):
 
         arrive_eps = FRONTIER_ARRIVE_EPS if ctx.patrol_source == "frontier" else PATROL_ARRIVE_EPS
 
-        if d_tgt <= arrive_eps or d_end <= arrive_eps:
+        # legacy: 到站或路径走完都结束本轮巡逻，本帧不再做入侵检查。
+        if d_tgt <= arrive_eps or d_end <= arrive_eps or ctx.path_idx >= len(path):
             ctx.clear_patrol(clear_target=True)
             ctx.clear_active_path()
             ctx.auto_vlm_asked = False
@@ -168,14 +174,6 @@ class PatrolFollowState(BaseNavState):
             return StateDecision(
                 next_state=InquiryState,
                 command_desc="patrol waypoint reached -> inquiry",
-                reset_motion=True,
-            )
-
-        if ctx.path_idx >= len(path):
-            ctx.clear_active_path()
-            return StateDecision(
-                next_state=PatrolPlanState,
-                command_desc="patrol path exhausted, target remaining -> replan",
                 reset_motion=True,
             )
 
@@ -224,10 +222,10 @@ class PatrolFollowState(BaseNavState):
                 if ctx.patrol_goal_nav is not None and not check_nav_point(ctx.patrol_goal_nav, snapshot.obstacle_snapshot).safe:
                     ctx.patrol_goal_nav = None
                 ctx.clear_active_path()
+                ctx.coast_replan = True
                 return StateDecision(
                     next_state=PatrolPlanState,
                     command_desc=f"path blocked ({path_check.reason}) -> replan",
-                    reset_motion=True,
                 )
             return StateDecision(command_desc="stop (replan cooldown)", reset_motion=True)
 
@@ -247,20 +245,13 @@ class PatrolFollowState(BaseNavState):
         ctx.lookahead_target = lookahead
 
         if ctx.path_idx >= len(path):
-            if d_tgt <= arrive_eps:
-                ctx.clear_patrol(clear_target=True)
-                ctx.clear_active_path()
-                ctx.auto_vlm_asked = False
-                ctx.vlm_reask_pending = False
-                return StateDecision(
-                    next_state=InquiryState,
-                    command_desc="patrol path done, at goal -> inquiry",
-                    reset_motion=True,
-                )
+            ctx.clear_patrol(clear_target=True)
             ctx.clear_active_path()
+            ctx.auto_vlm_asked = False
+            ctx.vlm_reask_pending = False
             return StateDecision(
-                next_state=PatrolPlanState,
-                command_desc="patrol path exhausted, target remaining -> replan",
+                next_state=InquiryState,
+                command_desc="patrol path done -> inquiry",
                 reset_motion=True,
             )
 
@@ -273,4 +264,5 @@ class PatrolFollowState(BaseNavState):
 
     def on_exit(self, ctx: "NavContext", snapshot: FrameSnapshot) -> None:
         self.preturn_active = False
-        ctx.services.motion_thread.stop()
+        if not ctx.coast_replan:
+            ctx.services.motion_thread.stop()

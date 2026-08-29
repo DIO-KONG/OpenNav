@@ -202,10 +202,10 @@ class EscapeState(BaseNavState):
                 if np.hypot(p1_dx, p1_dz) <= 1e-6:
                     ctx.path_idx = 1
                     ctx.clear_escape()
+                    ctx.resume_from_escape = True
                     return StateDecision(
                         next_state=resume_cls,
                         command_desc="intrusion: path0 reached -> resume path",
-                        reset_motion=True,
                     )
                 else:
                     self.path1_yaw = float(np.arctan2(p1_dx, p1_dz))
@@ -244,10 +244,10 @@ class EscapeState(BaseNavState):
             if p1_aligned:
                 ctx.path_idx = 1
                 ctx.clear_escape()
+                ctx.resume_from_escape = True
                 return StateDecision(
                     next_state=resume_cls,
                     command_desc="intrusion: path1 aligned -> resume follow",
-                    reset_motion=True,
                 )
             return StateDecision(
                 linear=el,

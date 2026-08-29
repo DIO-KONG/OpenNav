@@ -31,6 +31,11 @@ class FinalAdjustState(BaseNavState):
         self.last_replan_t: float = 0.0
 
     def on_enter(self, ctx: "NavContext", snapshot: FrameSnapshot) -> None:
+        if ctx.resume_from_escape:
+            # legacy 恢复 ADJUST 不重进终调：保留 path / 计时 / 帧数。
+            ctx.resume_from_escape = False
+            ctx.reset_smoothers()
+            return
         self.enter_t = snapshot.now
         self.valid_frames = 1
         self.plan_fail_cnt = 0
@@ -92,25 +97,6 @@ class FinalAdjustState(BaseNavState):
         d_tgt = float(np.hypot(nav_pt[0] - cur_pose[0], nav_pt[1] - cur_pose[1]))
         ctx.d_tgt = d_tgt
 
-        # 障碍物入侵：到达判定之前，与 FOLLOW 共用同一净空语义
-        robot_check = check_nav_point(
-            (cur_pose[0], cur_pose[1]),
-            snapshot.obstacle_snapshot,
-            clearance=ROBOT_RADIUS,
-        )
-        ctx.d_robot = robot_check.clearance
-        if not robot_check.safe:
-            ctx.resume_state_cls = FinalAdjustState
-            ctx.escape_target = nav_pt
-            ctx.escape_semantic_target = target
-            ctx.escape_replan_from_semantic = False
-            ctx.clear_active_path()
-            return StateDecision(
-                next_state=EscapeState,
-                command_desc=f"intrusion in adjust (clr={robot_check.clearance:.2f}m) -> escape",
-                reset_motion=True,
-            )
-
         path = ctx.path
         if path is None or len(path) == 0:
             # 本帧只规划，下一帧再跟随（legacy: path is None 分支不落入 follow）
@@ -150,7 +136,8 @@ class FinalAdjustState(BaseNavState):
                         ctx.path_idx = 1
                 self.plan_fail_cnt = 0
                 ctx.final_adj_plan_fail_cnt = 0
-                return StateDecision(command_desc="plan pending (adjust)", reset_motion=True)
+                # 规划帧不停底盘：legacy FINAL_ADJUST 属 moving state，上一拍 cmd_vel 继续。
+                return StateDecision(command_desc="plan pending (adjust)")
 
             ctx.final_adj_plan_fail_cnt += 1
             if ctx.final_adj_plan_fail_cnt >= PLAN_FAIL_MAX:
@@ -168,6 +155,25 @@ class FinalAdjustState(BaseNavState):
             )
 
         d_end = float(np.hypot(path[-1][0] - cur_pose[0], path[-1][1] - cur_pose[1]))
+
+        # 有路径后才判入侵（legacy: path is None 只规划，不落入 follow/escape）
+        robot_check = check_nav_point(
+            (cur_pose[0], cur_pose[1]),
+            snapshot.obstacle_snapshot,
+            clearance=ROBOT_RADIUS,
+        )
+        ctx.d_robot = robot_check.clearance
+        if not robot_check.safe:
+            ctx.resume_state_cls = FinalAdjustState
+            ctx.escape_target = nav_pt
+            ctx.escape_semantic_target = target
+            ctx.escape_replan_from_semantic = False
+            ctx.clear_active_path()
+            return StateDecision(
+                next_state=EscapeState,
+                command_desc=f"intrusion in adjust (clr={robot_check.clearance:.2f}m) -> escape",
+                reset_motion=True,
+            )
 
         # 到达 GOAL_NAV / 路径末点：先停车再判断锁定
         if d_tgt <= PATROL_ARRIVE_EPS or d_end <= PATROL_ARRIVE_EPS:
@@ -211,7 +217,7 @@ class FinalAdjustState(BaseNavState):
                     return locked
                 return StateDecision(command_desc="hold (adjust, at GOAL_NAV)", reset_motion=True)
             ctx.clear_active_path()
-            return StateDecision(command_desc="adjust: path done, replan pending", reset_motion=True)
+            return StateDecision(command_desc="adjust: path done, replan pending")
 
         # 未到 GOAL_NAV：跟随后再判断锁定（含 FORCE_TIMEOUT），保留本帧跟随速度
         locked = self._lock_if_ready(ctx, d_tgt, now, linear=cmd[0], angular=cmd[1])
