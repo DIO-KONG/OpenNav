@@ -30,6 +30,7 @@ REPLAN_PERIOD = 1.0
 PLAN_BOX_PAD = 3.0                        # 局部规划窗口余量 (起点到终点包围盒双向外扩)
 RRT_PLAN_TIME = 0.5                       # 单次 RRT* 规划最大超时时间 (s)
 GOAL_RETRIEVE_MAX = 2.0                   # 语义目标点周围候选安全站位的最大检索半径 (m)
+PLAN_FAIL_MAX = 10                        # 连续 RRT 规划失败次数上限 (与 legacy 模块级常量一致)
 
 # 目标到达容差判定 (m)
 PATROL_ARRIVE_EPS = ROBOT_RADIUS * 0.3    # 普通巡逻/航路点到达容差

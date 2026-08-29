@@ -7,11 +7,11 @@ from fsm.base_state import BaseNavState
 from fsm.decision import FrameSnapshot, StateDecision
 from nav_path import check_nav_point, resolve_nav_goal, plan_goal_resolution, plan_path
 from nav_helpers import auto_trigger_patrol
+from nav_constants import PLAN_FAIL_MAX
 
 
 class PatrolPlanState(BaseNavState):
     name: str = "PATROL_PLAN"
-    PLAN_FAIL_MAX: int = 10
 
     def __init__(self):
         self.frontier_retry_t: float = 0.0
@@ -75,7 +75,7 @@ class PatrolPlanState(BaseNavState):
 
         # 规划失败处理（计数跨 FOLLOW->PLAN 保留）
         ctx.patrol_plan_fail_cnt += 1
-        if ctx.patrol_plan_fail_cnt >= self.PLAN_FAIL_MAX:
+        if ctx.patrol_plan_fail_cnt >= PLAN_FAIL_MAX:
             ft, _ = auto_trigger_patrol(
                 ctx.services.slam, cur_pose, snapshot.nav_y, snapshot.obs_current
             )

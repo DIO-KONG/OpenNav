@@ -9,6 +9,7 @@ from fsm.decision import FrameSnapshot, StateDecision
 from nav_constants import (
     ROBOT_RADIUS,
     PATROL_ARRIVE_EPS,
+    PLAN_FAIL_MAX,
     PRETURN_MIN_TURN_DEG,
     PRETURN_RETREAT_DISTANCE,
     PRETURN_RETREAT_SPEED,
@@ -220,7 +221,7 @@ class FinalFollowState(BaseNavState):
                 )
 
             ctx.final_adj_plan_fail_cnt += 1
-            if ctx.final_adj_plan_fail_cnt >= self.PLAN_FAIL_MAX:
+            if ctx.final_adj_plan_fail_cnt >= PLAN_FAIL_MAX:
                 ctx.final_adj_plan_fail_cnt = 0
                 ctx.final_goal_nav = None
                 ctx.clear_active_path()

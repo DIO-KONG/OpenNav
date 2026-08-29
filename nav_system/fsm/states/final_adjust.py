@@ -15,6 +15,7 @@ from nav_constants import (
     FOLLOW_WAYPOINT_THRESHOLD,
     PATROL_ARRIVE_EPS,
     ROBOT_RADIUS,
+    PLAN_FAIL_MAX,
 )
 from nav_path import check_nav_point, resolve_nav_goal, plan_goal_resolution, plan_path, follow_path_step
 from nav_helpers import _cmd_str
@@ -22,7 +23,6 @@ from nav_helpers import _cmd_str
 
 class FinalAdjustState(BaseNavState):
     name: str = "FINAL_ADJUST"
-    PLAN_FAIL_MAX: int = 10
 
     def __init__(self):
         self.enter_t: float = 0.0
@@ -153,7 +153,7 @@ class FinalAdjustState(BaseNavState):
                 return StateDecision(command_desc="plan pending (adjust)", reset_motion=True)
 
             ctx.final_adj_plan_fail_cnt += 1
-            if ctx.final_adj_plan_fail_cnt >= self.PLAN_FAIL_MAX:
+            if ctx.final_adj_plan_fail_cnt >= PLAN_FAIL_MAX:
                 ctx.final_adj_plan_fail_cnt = 0
                 ctx.final_goal_nav = None
                 ctx.clear_active_path()

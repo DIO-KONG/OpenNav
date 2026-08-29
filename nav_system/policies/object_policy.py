@@ -124,7 +124,24 @@ class ObjectNavPolicy(BaseNavigationPolicy):
                 )
                 if t3d is not None:
                     tx, tz = float(t3d[0]), float(t3d[2])
-                    d_tgt = ((tx - cur_pose[0]) ** 2 + (tz - cur_pose[1]) ** 2) ** 0.5
+                    # legacy: 先写入方向点，再用「当前站位或方向点」量到达距离；
+                    # walked 仍用语义点 (tx, tz)。站位若对应上一轮目标则作废。
+                    ctx.patrol_target = (tx, tz)
+                    ctx.patrol_source = "vlm_dir"
+                    ctx.goal_source = "vlm_dir"
+                    ctx.patrol_plan_fail_cnt = 0
+                    if (
+                        ctx.patrol_goal_nav is not None
+                        and ctx.patrol_target != ctx.patrol_goal_nav_target
+                    ):
+                        ctx.patrol_goal_nav = None
+                        ctx.patrol_goal_nav_target = None
+                    nav_pt = (
+                        ctx.patrol_goal_nav
+                        if ctx.patrol_goal_nav is not None
+                        else ctx.patrol_target
+                    )
+                    d_tgt = ((nav_pt[0] - cur_pose[0]) ** 2 + (nav_pt[1] - cur_pose[1]) ** 2) ** 0.5
                     walked = _goal_walked(ctx.services.slam.memory, tx, tz, nav_y)
 
                     if walked or d_tgt < PATROL_ARRIVE_EPS:

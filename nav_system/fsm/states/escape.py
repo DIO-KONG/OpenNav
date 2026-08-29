@@ -8,6 +8,7 @@ from fsm.decision import FrameSnapshot, StateDecision
 from nav_constants import (
     FOLLOW_LIN_MAX,
     ESCAPE_PATH0_ARRIVE_EPS,
+    PLAN_FAIL_MAX,
 )
 from nav_path import (
     check_nav_point,
@@ -24,7 +25,6 @@ from nav_path import (
 
 class EscapeState(BaseNavState):
     name: str = "ESCAPE"
-    PLAN_FAIL_MAX: int = 10
 
     def __init__(self):
         self.phase: str = "plan"          # "plan" | "path0" | "path1_align" | "fallback_retreat"
@@ -55,6 +55,8 @@ class EscapeState(BaseNavState):
     def on_update(self, ctx: "NavContext", snapshot: FrameSnapshot) -> StateDecision:
         from fsm.states.waiting import WaitingState
         from fsm.states.final_plan import FinalPlanState
+        from fsm.states.final_follow import FinalFollowState
+        from fsm.states.final_adjust import FinalAdjustState
         from fsm.states.patrol_plan import PatrolPlanState
 
         cur_pose = snapshot.cur_pose
@@ -105,7 +107,16 @@ class EscapeState(BaseNavState):
                     target = selected.goal
                     ctx.escape_target = target
                     new_path = resolved_path
+                    if resume_cls in (FinalFollowState, FinalAdjustState, FinalPlanState):
+                        ctx.final_goal_nav = selected.goal
+                    else:
+                        ctx.patrol_goal_nav = selected.goal
                     ctx.escape_replan_from_semantic = False
+                    print(
+                        f"[INTRUSION] phase=plan nav_goal_reselected "
+                        f"clearance={selected.clearance:.3f}m "
+                        f"action=plan_same_semantic_target"
+                    )
                 else:
                     ctx.escape_replan_from_semantic = True
 
@@ -147,7 +158,7 @@ class EscapeState(BaseNavState):
             else:
                 ctx.clear_active_path()
                 self.plan_fail_cnt += 1
-                if self.plan_fail_cnt >= self.PLAN_FAIL_MAX:
+                if self.plan_fail_cnt >= PLAN_FAIL_MAX:
                     self.phase = "fallback_retreat"
                     self.escape_dir = find_escape_dir((cur_pose[0], cur_pose[1]), esc_tree, fixed_y=fixed_y)
                     return StateDecision(command_desc="intrusion: plan failed max -> fallback retreat")

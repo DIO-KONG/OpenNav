@@ -5,11 +5,11 @@ from __future__ import annotations
 from fsm.base_state import BaseNavState
 from fsm.decision import FrameSnapshot, StateDecision
 from nav_path import check_nav_point, resolve_nav_goal, plan_goal_resolution, plan_path
+from nav_constants import PLAN_FAIL_MAX
 
 
 class FinalPlanState(BaseNavState):
     name: str = "FINAL_PLAN"
-    PLAN_FAIL_MAX: int = 10
     PLAN_RETRY_COOLDOWN: float = 2.0
 
     def on_enter(self, ctx: "NavContext", snapshot: FrameSnapshot) -> None:
@@ -73,7 +73,7 @@ class FinalPlanState(BaseNavState):
 
         ctx.final_plan_fail_cnt += 1
         ctx.final_plan_retry_t = now + self.PLAN_RETRY_COOLDOWN
-        if ctx.final_plan_fail_cnt >= self.PLAN_FAIL_MAX:
+        if ctx.final_plan_fail_cnt >= PLAN_FAIL_MAX:
             ctx.final_plan_fail_cnt = 0
             ctx.clear_final(clear_target=False)
             ctx.clear_active_path()
